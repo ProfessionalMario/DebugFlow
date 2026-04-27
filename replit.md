@@ -59,6 +59,27 @@ instead of the `keyboard` library, which required root on Linux. The import is
 guarded — if `pynput` can't load (e.g. no display server), the sentinel prints
 an actionable message and idles instead of crashing.
 
+### Hotkey Configuration (flow_service.py)
+Both hotkeys are env-configurable so users can dodge editor conflicts:
+
+* `FLOW_HUD_HOTKEY`     — toggle HUD open/close   (default `<ctrl>+<alt>+f`)
+* `FLOW_TRIGGER_HOTKEY` — fire engine ignite      (default `<ctrl>+<alt>+s`)
+
+The trigger default is intentionally NOT plain `Ctrl+S` — that's bound by every
+mainstream editor (VS Code / Sublime / IntelliJ / Notepad++) and the editor's
+"Save" handler runs first, making the trigger feel dead. `Ctrl+Alt+S` avoids
+that. Format follows pynput's HotKey grammar (e.g. `<ctrl>+<alt>+h`, `<f5>`).
+Invalid grammar is caught and logged with an actionable message instead of
+silently killing the sentinel.
+
+### Per-Hotkey Debounce (flow_service.py)
+`toggle_hud` and `log_save_event` each have their own `last_*_time` counter
+(previously they shared one, which silently dropped the second of any two
+hotkeys pressed within 0.7s of each other). The toggle debounce is widened
+to 1.2s because pynput on Windows can re-detect `Ctrl+Alt+<letter>` as the
+user releases keys in non-uniform order — a wide guard prevents the second
+fire from instantly closing the HUD that the first fire just opened.
+
 ### User-Input & Loop Tolerance (flow_engine.py)
 The ghost (dry-run) pass is bounded three ways so a user's traced code can't
 hang the HUD:

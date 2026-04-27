@@ -57,19 +57,36 @@ PYTHON_EXE = _get_python()
 
 class FlowSentinel:
     def __init__(self):
-        self.last_trigger_time = 0
-        self.debounce_duration = 0.7
+        # Per-hotkey debounce timestamps. They MUST be independent — a single
+        # shared timer caused Ctrl+Alt+F immediately followed by the trigger
+        # hotkey (or vice versa) to silently drop one of the two events.
+        self._last_toggle_time = 0.0
+        self._last_trigger_time = 0.0
+
+        # toggle_hud needs a longer guard than the trigger because pynput on
+        # Windows can re-detect Ctrl+Alt+<letter> as the user releases keys in
+        # varied order — without a wide debounce the second fire instantly
+        # closes what the first one just opened.
+        self._toggle_debounce = 1.2
+        self._trigger_debounce = 0.7
+
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.hud_pid_file = os.path.join(self.base_dir, ".hud_pid")
         self.engine_pid_file = os.path.join(self.base_dir, ".engine_pid")
         self.hud_script = os.path.join(self.base_dir, "flow_hud.py")
 
-    def _is_debouncing(self):
-        """Strict mechanical debounce."""
-        current_time = time.time()
-        if current_time - self.last_trigger_time < self.debounce_duration:
+    def _is_debouncing_toggle(self):
+        now = time.time()
+        if now - self._last_toggle_time < self._toggle_debounce:
             return True
-        self.last_trigger_time = current_time
+        self._last_toggle_time = now
+        return False
+
+    def _is_debouncing_trigger(self):
+        now = time.time()
+        if now - self._last_trigger_time < self._trigger_debounce:
+            return True
+        self._last_trigger_time = now
         return False
 
     def _get_pid_from_file(self, path):
@@ -86,9 +103,12 @@ class FlowSentinel:
 
     def toggle_hud(self):
         """Toggle the HUD window on/off and sync the Ghost Pipeline."""
-        log.info("⌨️  Ctrl+Alt+F received — toggle_hud() fired.")
-        if self._is_debouncing():
-            log.info("⏱️  Debounce active, skipping.")
+        log.info("⌨️  HUD hotkey received — toggle_hud() fired.")
+        if self._is_debouncing_toggle():
+            log.info(
+                f"⏱️  Toggle debounce active (<{self._toggle_debounce}s since last). "
+                "Ignoring re-fire from key bounce."
+            )
             return
 
         active_pid = self._get_pid_from_file(self.hud_pid_file)
@@ -162,14 +182,16 @@ class FlowSentinel:
 
     def log_save_event(self):
         """
-        Triggered by Ctrl+S.
+        Triggered by the user-configurable trigger hotkey (default Ctrl+Alt+S).
         Ignites the engine only when the HUD is physically alive in the OS.
         """
         # Loud entry log — confirms pynput actually delivered the hotkey.
-        log.info("⌨️  Ctrl+S received — log_save_event() fired.")
+        log.info("⌨️  Trigger hotkey received — log_save_event() fired.")
 
-        if self._is_debouncing():
-            log.info("⏱️  Ctrl+S debounce active (<0.7s since last). Skipping.")
+        if self._is_debouncing_trigger():
+            log.info(
+                f"⏱️  Trigger debounce active (<{self._trigger_debounce}s since last). Skipping."
+            )
             return
 
         try:
@@ -225,8 +247,24 @@ class FlowSentinel:
     def start_listening(self):
         """
         Entry point for the background daemon.
-        Binds Ctrl+Alt+F and Ctrl+S using pynput GlobalHotKeys, which works
-        cross-platform without needing root on Linux desktop environments.
+
+        Hotkeys are configurable via env vars so users on different OSes /
+        editors can dodge conflicts:
+
+            FLOW_HUD_HOTKEY      (default '<ctrl>+<alt>+f')
+            FLOW_TRIGGER_HOTKEY  (default '<ctrl>+<alt>+s')
+
+        The trigger default is intentionally NOT plain Ctrl+S — that combo is
+        bound by virtually every editor (VS Code, Sublime, IntelliJ, Notepad++)
+        for "Save File", and even though pynput's low-level Windows hook
+        usually still sees the key, the editor's save handler fires first and
+        many users perceive the trigger as "dead". Ctrl+Alt+S avoids that.
+
+        Format follows pynput's HotKey grammar:
+          modifiers: <ctrl> <alt> <shift> <cmd> <super>  + a single key, e.g.
+            <ctrl>+<alt>+s
+            <ctrl>+<shift>+1
+            <f5>
         """
         if not _KEYBOARD_AVAILABLE:
             print(
@@ -240,15 +278,61 @@ class FlowSentinel:
                 time.sleep(10)
             return
 
-        log.info("⌨️  Binding hotkeys via pynput...")
+        hud_hotkey = os.environ.get("FLOW_HUD_HOTKEY", "<ctrl>+<alt>+f").strip()
+        trigger_hotkey = os.environ.get("FLOW_TRIGGER_HOTKEY", "<ctrl>+<alt>+s").strip()
+
+        # Friendly label for stdout (strips the angle brackets pynput requires).
+        def _pretty(h):
+            return (
+                h.replace("<", "")
+                 .replace(">", "")
+                 .replace("ctrl", "Ctrl")
+                 .replace("alt", "Alt")
+                 .replace("shift", "Shift")
+                 .replace("cmd", "Cmd")
+                 .replace("+", " + ")
+                 .upper()
+                 .replace("CTRL", "Ctrl")
+                 .replace("ALT", "Alt")
+                 .replace("SHIFT", "Shift")
+                 .replace("CMD", "Cmd")
+            )
+
+        # Tell the user — both via stdout (visible in their terminal) and the
+        # log file — exactly which keys are live, so there's no guessing.
+        banner = (
+            "\n  ──────────────────────────────────────\n"
+            "  ⌨️   DebugFlow hotkeys active:\n"
+            f"        Toggle HUD     : {_pretty(hud_hotkey)}\n"
+            f"        Run / Trigger  : {_pretty(trigger_hotkey)}\n"
+            "  ──────────────────────────────────────\n"
+            "  Override via env vars:\n"
+            "      FLOW_HUD_HOTKEY      (e.g. '<ctrl>+<alt>+h')\n"
+            "      FLOW_TRIGGER_HOTKEY  (e.g. '<f5>')\n"
+            "  ──────────────────────────────────────\n"
+        )
+        print(banner)
+        log.info(
+            f"⌨️  Binding hotkeys: HUD='{hud_hotkey}', TRIGGER='{trigger_hotkey}'"
+        )
+
         try:
             hotkeys = {
-                "<ctrl>+<alt>+f": self.toggle_hud,
-                "<ctrl>+s": self.log_save_event,
+                hud_hotkey: self.toggle_hud,
+                trigger_hotkey: self.log_save_event,
             }
             with _pynput_kb.GlobalHotKeys(hotkeys) as hk:
                 log.info("System Hooks Active. Sentinel in Standby.")
                 hk.join()
+        except ValueError as e:
+            # pynput raises ValueError on a malformed HotKey grammar. Be loud
+            # so the user knows their env var was rejected before the sentinel
+            # silently dies.
+            log.error(
+                f"Invalid hotkey grammar: {e}. "
+                f"Check FLOW_HUD_HOTKEY / FLOW_TRIGGER_HOTKEY format."
+            )
+            print(f"  ⚠️  [INVALID HOTKEY]: {e}")
         except Exception as e:
             log.error(f"Sentinel Loop Fatal Error: {e}")
             print(f"  ⚠️  [SENTINEL ERROR]: {e}")

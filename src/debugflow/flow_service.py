@@ -131,9 +131,13 @@ class FlowSentinel:
                 f"FlowEngine.ignite_from_service({repr(sync_id)})"
             )
 
+            # No cwd override — inherit the sentinel's working directory,
+            # which is the user's project folder (set when `flow activate` ran).
+            # Using cwd=self.base_dir was pointing at the package's own directory,
+            # causing ignite_from_service to find animation.py / flow_bridge.py
+            # instead of the user's scripts.
             subprocess.Popen(
                 [PYTHON_EXE, "-c", engine_cmd],
-                cwd=self.base_dir,
                 **_make_flags(detached=False),
             )
             log.info("📊 Ghost Pipeline: Architecture Snapshot Sent.")
@@ -188,9 +192,10 @@ class FlowSentinel:
                 f"FlowEngine.ignite_from_service({repr(sync_id)})"
             )
 
+            # Same fix as ghost pipeline — no cwd override so the engine
+            # scans the user's project directory, not the package source.
             new_engine = subprocess.Popen(
                 [PYTHON_EXE, "-c", engine_cmd],
-                cwd=self.base_dir,
                 **_make_flags(detached=False),
             )
 

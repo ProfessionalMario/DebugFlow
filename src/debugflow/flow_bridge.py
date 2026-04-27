@@ -63,23 +63,44 @@ class Flow:
                 try:
                     sig = inspect.signature(node)
 
-                    # GATE 1 — Input type check (fires on 'processing' events)
+                    # GATE 1 — Input checks (fires on 'processing' events)
                     if isinstance(params, dict):
-                        for key, val in params.items():
-                            if key not in sig.parameters:
-                                continue
-                            expected = sig.parameters[key].annotation
-                            # Skip unannotated params
-                            if expected is inspect.Parameter.empty:
-                                continue
-                            if not isinstance(val, expected):
-                                final_type = "nuke"
-                                want = getattr(expected, "__name__", str(expected))
-                                got = builtins_type(val).__name__
-                                display_params = (
-                                    f"CRIT_FAIL [IN]: '{key}' expected {want}, got {got}"
-                                )
-                                break
+
+                        # 1a. PARAM COUNT — detect unexpected / extra arguments.
+                        # We compare the keys actually passed against the declared
+                        # parameters, ignoring *args / **kwargs collectors.
+                        declared = {
+                            n for n, p in sig.parameters.items()
+                            if p.kind not in (
+                                inspect.Parameter.VAR_POSITIONAL,   # *args
+                                inspect.Parameter.VAR_KEYWORD,      # **kwargs
+                            )
+                        }
+                        unexpected = [k for k in params if k not in declared]
+                        if unexpected:
+                            final_type = "nuke"
+                            display_params = (
+                                f"CRIT_FAIL [COUNT]: unexpected param(s): "
+                                f"{', '.join(unexpected)}"
+                            )
+                        else:
+                            # 1b. TYPE CHECK — validate each annotated param.
+                            for key, val in params.items():
+                                if key not in sig.parameters:
+                                    continue
+                                expected = sig.parameters[key].annotation
+                                # Skip unannotated params — no annotation = no contract
+                                if expected is inspect.Parameter.empty:
+                                    continue
+                                if not isinstance(val, expected):
+                                    final_type = "nuke"
+                                    want = getattr(expected, "__name__", str(expected))
+                                    got = builtins_type(val).__name__
+                                    display_params = (
+                                        f"CRIT_FAIL [TYPE]: '{key}' expected "
+                                        f"{want}, got {got}"
+                                    )
+                                    break
 
                     # GATE 2 — Return type check (fires on 'success' events)
                     if returns is not None:

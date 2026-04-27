@@ -19,8 +19,19 @@ test.py                  — Dev test script
 
 ## Entry Points
 
-- `flow activate` — CLI command (pyproject.toml script), toggles the sentinel
-- `python run.py` — Replit workflow; verifies all modules load correctly
+| Command | Function |
+|---|---|
+| `flow activate` | Toggle the NeuralFlow sentinel on/off |
+| `flow-logs on` | Enable file logging persistently |
+| `flow-logs off` | Disable file logging (complete silence) |
+| `flow-logs status` | Show current logging state |
+| `python run.py` | Replit workflow — verifies all modules load |
+
+## Logging
+
+State is stored in `~/.debugflow/.debug_on` (flag file).
+Log output goes to `~/.debugflow/debugflow.log`.
+No env vars needed — persists across restarts and reinstalls.
 
 ## Key Design Decisions
 

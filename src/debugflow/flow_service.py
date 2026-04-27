@@ -86,7 +86,9 @@ class FlowSentinel:
 
     def toggle_hud(self):
         """Toggle the HUD window on/off and sync the Ghost Pipeline."""
+        log.info("⌨️  Ctrl+Alt+F received — toggle_hud() fired.")
         if self._is_debouncing():
+            log.info("⏱️  Debounce active, skipping.")
             return
 
         active_pid = self._get_pid_from_file(self.hud_pid_file)
@@ -102,9 +104,12 @@ class FlowSentinel:
             env = os.environ.copy()
             env["FLOW_UI_ALLOWED"] = "TRUE"
 
+            # Run as a module (-m) so relative imports inside flow_hud.py work
+            # correctly when DebugFlow is installed as a package.
+            # Running the .py file directly would cause ImportError on
+            # 'from . import log' and 'from .animation import FlowAnimator'.
             proc = subprocess.Popen(
-                [PYTHON_EXE, self.hud_script],
-                cwd=self.base_dir,
+                [PYTHON_EXE, "-m", "debugflow.flow_hud"],
                 env=env,
                 **_make_flags(detached=True),
             )

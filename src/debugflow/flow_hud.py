@@ -5,12 +5,92 @@ import time
 import math
 import sys
 import os
+import platform
+import shutil
+import subprocess
 import traceback
 from . import log
 import socket
 import json
 from .animation import FlowAnimator
 # This automatically connects to your LoggerSystem because it's under 'debugflow'
+
+
+# --- EDITOR LAUNCHER (click-to-source) ---
+# Try a list of well-known editor CLIs first, fall back to the OS-level
+# 'open this file' handler. Users can override the whole thing with the
+# FLOW_EDITOR_CMD env var, e.g. `FLOW_EDITOR_CMD="code -g {file}:{line}"`.
+def open_in_editor(file_path, line_no):
+    """
+    Best-effort 'jump to file:line' for the user's editor.
+
+    Order:
+      1. FLOW_EDITOR_CMD env var (template with {file} / {line}).
+      2. VS Code / Cursor / Windsurf via `code -g`.
+      3. Sublime Text via `subl`.
+      4. PyCharm via `pycharm --line`.
+      5. OS-level open (no line number, just opens the file).
+    """
+    if not file_path or not os.path.exists(file_path):
+        log.warning(f"Click-to-source: file not found ({file_path}).")
+        return False
+
+    line_no = int(line_no or 1)
+
+    # 1. Explicit override.
+    template = os.environ.get("FLOW_EDITOR_CMD")
+    if template:
+        try:
+            cmd = template.format(file=file_path, line=line_no)
+            subprocess.Popen(cmd, shell=True)
+            log.info(f"Opened {file_path}:{line_no} via FLOW_EDITOR_CMD.")
+            return True
+        except Exception as e:
+            log.error(f"FLOW_EDITOR_CMD failed: {e}")
+
+    # 2-4. Auto-detect editors in priority order.
+    candidates = [
+        ["code", "-g", f"{file_path}:{line_no}"],
+        ["cursor", "-g", f"{file_path}:{line_no}"],
+        ["windsurf", "-g", f"{file_path}:{line_no}"],
+        ["subl", f"{file_path}:{line_no}"],
+        ["pycharm", "--line", str(line_no), file_path],
+    ]
+    for cmd in candidates:
+        if shutil.which(cmd[0]):
+            try:
+                subprocess.Popen(cmd)
+                log.info(f"Opened {file_path}:{line_no} via {cmd[0]}.")
+                return True
+            except Exception as e:
+                log.warning(f"Editor {cmd[0]} failed: {e}")
+                continue
+
+    # 5. Final fallback — just open the file at the OS level.
+    try:
+        sys_name = platform.system()
+        if sys_name == "Windows":
+            os.startfile(file_path)  # type: ignore[attr-defined]
+        elif sys_name == "Darwin":
+            subprocess.Popen(["open", file_path])
+        else:
+            subprocess.Popen(["xdg-open", file_path])
+        log.info(f"Opened {file_path} via OS handler (no line jump).")
+        return True
+    except Exception as e:
+        log.error(f"All editor launchers failed: {e}")
+        return False
+
+
+def _format_duration(ms):
+    """Compact, glanceable duration label for the hover overlay."""
+    if ms is None:
+        return ""
+    if ms < 1.0:
+        return f"{ms*1000:.0f}μs"
+    if ms < 1000.0:
+        return f"{ms:.1f}ms"
+    return f"{ms/1000:.2f}s"
 
 WIN_HEIGHT= 850
 WIN_WIDTH= 400
@@ -163,6 +243,38 @@ class FlowHUD:
             dpg.add_mouse_drag_handler(button=0, callback=self._drag_callback)
             # dpg.add_key_press_handler(key=dpg.mvKey_Tab, callback=self._toggle_mode)
             dpg.add_mouse_wheel_handler(callback=self._wheel_callback)
+            # Click → jump to source for the nearest node under the cursor.
+            dpg.add_mouse_click_handler(button=0, callback=self._click_callback)
+
+    def _click_callback(self, sender, app_data):
+        """
+        Hit-test the click against every visible node's center; if within a
+        small radius, open that function's source file at its definition line.
+        Clicks inside the DragHandle are ignored so window-drag still works.
+        """
+        try:
+            if dpg.is_item_hovered("DragHandle"):
+                return
+            m_pos = dpg.get_mouse_pos(local=True)
+            for node in self.node_map:
+                nx, ny = node["pos"]
+                ny_off = ny + self.scroll_offset
+                # Cull off-screen nodes
+                if not (0 < ny_off < WIN_HEIGHT):
+                    continue
+                dist = math.sqrt((m_pos[0] - nx) ** 2 + (m_pos[1] - ny_off) ** 2)
+                if dist < 25:
+                    f = node.get("file")
+                    ln = node.get("line")
+                    if f:
+                        # Run the launcher off the UI thread so a slow editor
+                        # spawn never stalls the HUD frame loop.
+                        threading.Thread(
+                            target=open_in_editor, args=(f, ln), daemon=True
+                        ).start()
+                    return
+        except Exception as e:
+            log.error(f"Click handler error: {e}")
 
     def _wheel_callback(self, sender, app_data):
         # Update target scroll based on wheel input
@@ -226,7 +338,18 @@ class FlowHUD:
                     
                     if new_params != "void": existing_node["params"] = new_params
                     if new_returns != "void": existing_node["returns"] = new_returns
-                    
+
+                    # Carry through any newly-known metadata. Duration only
+                    # arrives on the success/nuke event because the call hasn't
+                    # finished yet at 'processing' time.
+                    if msg.get("file") is not None:
+                        existing_node["file"] = msg.get("file")
+                        existing_node["line"] = msg.get("line")
+                    if msg.get("module") is not None:
+                        existing_node["module"] = msg.get("module")
+                    if msg.get("duration_ms") is not None:
+                        existing_node["duration_ms"] = msg.get("duration_ms")
+
                     # --- FIRE RETURN PULSE (UP) ---
                     if existing_node["type"] == "processing" and msg_type in ["success", "nuke"]:
                         idx = self.node_map.index(existing_node)
@@ -250,7 +373,12 @@ class FlowHUD:
                     "returns": self._format_type(msg.get('returns')),
                     "type": msg_type,
                     "birth": time.time(),
-                    "current_alpha": 1.0
+                    "current_alpha": 1.0,
+                    # Source + timing metadata (all optional — None for SYSCALLs).
+                    "file": msg.get("file"),
+                    "line": msg.get("line"),
+                    "module": msg.get("module"),
+                    "duration_ms": msg.get("duration_ms"),
                 }
                 
                 # --- FIRE CALL PULSE (DOWN) ---
@@ -339,6 +467,26 @@ class FlowHUD:
                         # Returns (BOTTOM)
                         dpg.draw_text(pos=[nx - (len(node["returns"])*3.8), ny_off + 14], 
                                      text=node["returns"], color=text_accent, size=14, parent="NerveCanvas")
+
+                        # --- HOVER METADATA OVERLAY ---
+                        # When the cursor is near a node, surface the source
+                        # module and total time the call took. Sits below the
+                        # 'returns' line, smaller (12px) and dimmer cyan so it
+                        # reads as metadata rather than primary content. Stays
+                        # inside the existing palette — no new theme colors.
+                        if dist < 45:
+                            mod = node.get("module") or ""
+                            dur = _format_duration(node.get("duration_ms"))
+                            parts = [p for p in (mod, dur) if p]
+                            if parts:
+                                meta_text = " · ".join(parts)
+                                dpg.draw_text(
+                                    pos=[nx - (len(meta_text) * 3.2), ny_off + 32],
+                                    text=meta_text,
+                                    color=[120, 200, 230, m_alpha],
+                                    size=12,
+                                    parent="NerveCanvas",
+                                )
 
                         # State Core (Overlays the Animator's beat core for state feedback)
                         dpg.draw_circle(center=[nx, ny_off], radius=5, color=[*orb_c, 255], 

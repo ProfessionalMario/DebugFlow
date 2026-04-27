@@ -280,9 +280,19 @@ def activate():
             sys.exit(0)
 
     # --- START SERVICE ---
+    # Capture the user's project folder NOW (where they ran `flow activate`)
+    # and propagate it to every child process via FLOW_PROJECT_ROOT.
+    # Detached pythonw.exe subprocesses on Windows commonly inherit
+    # C:\Users\<name> as their cwd, which is why logs were landing in the
+    # home folder. This pins them to the project no matter what cwd the
+    # detached process ends up with.
+    env = os.environ.copy()
+    env["FLOW_PROJECT_ROOT"] = os.getcwd()
+
     subprocess.Popen(
         [PYTHON_EXE, "-m", "debugflow.flow_service"],
         close_fds=True,
+        env=env,
         **_make_flags(detached=True),
     )
 

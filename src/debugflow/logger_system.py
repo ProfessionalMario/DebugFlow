@@ -11,6 +11,7 @@ restarts, new terminals, and reinstalls.
 Log output goes to ~/.debugflow/debugflow.log
 """
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -21,11 +22,34 @@ from pathlib import Path
 _FLAG_DIR  = Path.home() / ".debugflow"
 _FLAG_FILE = _FLAG_DIR / ".debug_on"
 
-# Log file goes into the project the user ran `flow activate` from.
-# Path.cwd() is resolved at import time, which happens inside the sentinel
-# subprocess that inherits the working directory from the terminal where
-# `flow activate` was run — so this always points at the user's project.
-_LOG_DIR  = Path.cwd() / "logs"
+
+def _resolve_project_root() -> Path:
+    """
+    Resolve the project root for the log directory.
+
+    Priority:
+      1. FLOW_PROJECT_ROOT — set by `flow activate` to the cwd at invocation
+         time and inherited by every spawned subprocess (sentinel, HUD, engine).
+         This is the source of truth: it's the folder the user ran the command
+         from, regardless of where pythonw.exe / detached subprocesses end up.
+      2. Path.cwd() — fallback for direct dev usage (e.g. `python test.py`).
+
+    Without (1), detached subprocesses on Windows commonly inherit
+    C:\\Users\\<name> as their cwd, which is why logs were landing in the
+    home folder instead of the user's project.
+    """
+    env_root = os.environ.get("FLOW_PROJECT_ROOT")
+    if env_root:
+        try:
+            p = Path(env_root)
+            if p.exists():
+                return p
+        except Exception:
+            pass
+    return Path.cwd()
+
+
+_LOG_DIR  = _resolve_project_root() / "logs"
 _LOG_FILE = _LOG_DIR / "debugflow.log"
 # ---------------------------------------------------------------------
 

@@ -29,6 +29,12 @@ _ghost_start_time = [0.0]
 _ghost_input_count = [0]
 _ghost_aborted = [False]
 
+# --- PER-CALL TIMING ---
+# Maps id(frame) → start timestamp so we can compute total time spent in each
+# function call. Frame ids are unique for the lifetime of a single invocation,
+# which means recursion / re-entrant calls each get their own entry.
+_call_start_ts = {}
+
 
 def _stop_ghost_trace(reason: str):
     """
@@ -171,6 +177,18 @@ def trace_calls(frame, event, arg):
         is_rt = os.environ.get("FLOW_REAL_TIME") == "TRUE"
         is_ghost = os.environ.get("FLOW_MODE") == "SIMULATION"
 
+        # --- SOURCE METADATA (for click-to-source + hover module label) ---
+        # File + first line of the function definition so the HUD can open
+        # the editor at the right place. Module name comes from the frame's
+        # __name__ so user code in `__main__` shows as such, with a basename
+        # fallback for safety.
+        src_file = current_file
+        src_line = frame.f_code.co_firstlineno
+        module_name = (
+            frame.f_globals.get("__name__")
+            or os.path.splitext(os.path.basename(current_file))[0]
+        )
+
         if event == "call":
             # --- GHOST LOOP GUARDS ---
             # During a ghost pass, bound how much we trace so the user's
@@ -196,28 +214,65 @@ def trace_calls(frame, event, arg):
                     )
                     return None
 
+            # Stamp call start so the matching return/exception can compute
+            # the total time the function took. Keyed by frame id so recursive
+            # / re-entrant invocations each get their own timer.
+            _call_start_ts[id(frame)] = time.perf_counter()
+
             # Capture the live local variables at call time.
             # These are the actual param values the function received, enabling
             # accurate type-gate validation inside Flow.pulse.
             live_params = dict(frame.f_locals)
-            Flow.pulse(fn_obj or func_name, params=live_params, node_type="processing")
+            Flow.pulse(
+                fn_obj or func_name,
+                params=live_params,
+                node_type="processing",
+                file=src_file,
+                line=src_line,
+                module=module_name,
+            )
             if not is_rt and not is_ghost:
                 # Cinematic delay only in live mode — ghost runs instantly
                 time.sleep(1.0)
 
         elif event == "exception":
             os.environ["FLOW_BLAST_CRITICAL"] = "TRUE"
-            Flow.pulse(fn_obj or func_name, node_type="nuke")
+            duration_ms = _pop_duration_ms(frame)
+            Flow.pulse(
+                fn_obj or func_name,
+                node_type="nuke",
+                file=src_file,
+                line=src_line,
+                module=module_name,
+                duration_ms=duration_ms,
+            )
             return None
 
         elif event == "return":
             # arg is the actual return value from Python's trace protocol
-            Flow.pulse(fn_obj or func_name, returns=arg, node_type="success")
+            duration_ms = _pop_duration_ms(frame)
+            Flow.pulse(
+                fn_obj or func_name,
+                returns=arg,
+                node_type="success",
+                file=src_file,
+                line=src_line,
+                module=module_name,
+                duration_ms=duration_ms,
+            )
             if not is_rt and not is_ghost:
                 # Cinematic delay only in live mode
                 time.sleep(0.5)
 
     return trace_calls
+
+
+def _pop_duration_ms(frame):
+    """Compute and clear the elapsed time (ms) for a frame's matching call."""
+    start = _call_start_ts.pop(id(frame), None)
+    if start is None:
+        return None
+    return round((time.perf_counter() - start) * 1000.0, 2)
 
 
 def secure_gate(mode="LIVE"):

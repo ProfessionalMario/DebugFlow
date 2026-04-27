@@ -35,15 +35,24 @@ class Flow:
             print(f"  🛑  [INIT_FAILURE]: NeuralFlow could not bridge. Error: {str(e)[:50]}...")
 
     @staticmethod
-    def pulse(node, params=None, returns=None, node_type="pulse"):
+    def pulse(node, params=None, returns=None, node_type="pulse",
+              file=None, line=None, module=None, duration_ms=None):
         """
         Send an execution event to the HUD.
 
         Args:
-            node:       A callable or a string name (e.g. a function object or "SYSCALL: REFRESH").
-            params:     Dict of {param_name: value} captured at call-time, or a plain string/None.
-            returns:    The actual return value of the function, or None.
-            node_type:  One of "processing", "success", "nuke", "refresh", "pulse".
+            node:        A callable or a string name (e.g. a function object or "SYSCALL: REFRESH").
+            params:      Dict of {param_name: value} captured at call-time, or a plain string/None.
+            returns:     The actual return value of the function, or None.
+            node_type:   One of "processing", "success", "nuke", "refresh", "pulse".
+            file:        Absolute path to the source file the function lives in
+                         (used by the HUD's click-to-source handler).
+            line:        First line of the function definition (co_firstlineno).
+            module:      Python module name the function belongs to (e.g. '__main__'),
+                         shown in the HUD hover overlay.
+            duration_ms: Total wall-clock time the call took, in milliseconds.
+                         Sent on success/nuke events; None on the initial 'processing'
+                         event because the call hasn't finished yet.
 
         Returns:
             None. Failures are silently swallowed so they never interrupt the traced script.
@@ -140,6 +149,13 @@ class Flow:
                 "params": display_params,
                 "returns": display_returns,
                 "type": final_type,
+                # Source + timing metadata for the HUD's hover overlay and
+                # click-to-source feature. All optional — None when unavailable
+                # (e.g. for SYSCALL: REFRESH events).
+                "file": file,
+                "line": line,
+                "module": module,
+                "duration_ms": duration_ms,
             }
 
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

@@ -84,6 +84,36 @@ node shows both the data type and the actual value. Output is bounded so it
 fits inside the 400px HUD column. CRIT_FAIL strings from the type-gate are
 left untouched.
 
+### Project-Rooted Logs (flow_service.py, logger_system.py)
+`flow activate` captures `os.getcwd()` into `FLOW_PROJECT_ROOT` and propagates
+it to the sentinel/HUD/engine subprocesses via `env=`. `logger_system.py`
+reads that env var first when picking `_LOG_DIR`, falling back to `Path.cwd()`
+only for direct dev usage. This pins logs to the user's project even when
+detached pythonw.exe processes inherit `C:\Users\<name>` as their cwd.
+
+### Per-Node Timing (flow_engine.py → flow_bridge.py → flow_hud.py)
+`trace_calls` stamps `time.perf_counter()` into `_call_start_ts[id(frame)]` on
+every `call` event, then pops it on the matching `return` / `exception` to
+compute `duration_ms` (rounded to 0.01ms). The bridge ships it in the payload
+and the HUD stores it on the node, surfacing it only on hover so the
+non-hovered view stays clean.
+
+### Click-to-Source (flow_hud.py)
+Every node carries `file` (absolute path) and `line` (`co_firstlineno`)
+captured from the live frame in `trace_calls`. A DPG mouse-click handler
+hit-tests the click against visible node centers (radius 25px, ignoring the
+DragHandle) and calls `open_in_editor(file, line)` on a daemon thread so a
+slow editor spawn never stalls the UI loop. The launcher tries, in order:
+`FLOW_EDITOR_CMD` env override → `code -g` → `cursor -g` → `windsurf -g` →
+`subl` → `pycharm --line` → OS-level open as final fallback.
+
+### Hover Metadata Overlay (flow_hud.py)
+Reuses the existing `dist < 45` hover trigger that already drives node alpha.
+When triggered, draws a single `module · duration` line at size 12 (vs 14/16
+for primary content) in dim cyan `[120, 200, 230]`, sitting just below the
+`returns` label. No new theme bindings, no new fonts — purely a smaller,
+dimmer use of the existing palette so it reads as metadata.
+
 ## Dependencies
 
 ```

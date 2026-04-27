@@ -362,7 +362,33 @@ def generate_ball(annotation):
         dict: {},
         tuple: (),
     }
-    return mapping.get(annotation, None)
+    if annotation in mapping:
+        return mapping[annotation]
+    # Light ML / scientific-stack support.  Detect by qualified name so we
+    # never add hard imports of torch / numpy / pandas — they're imported
+    # lazily, and only when the user has actually annotated a parameter
+    # with that type (which means they must already have the library
+    # installed).  Smallest possible mock per type to keep ghost-pass
+    # cost negligible.
+    mod = getattr(annotation, "__module__", "") or ""
+    name = getattr(annotation, "__name__", "") or ""
+    try:
+        if mod.startswith("torch") and name == "Tensor":
+            import torch
+            return torch.zeros(1)
+        if mod.startswith("numpy") and name == "ndarray":
+            import numpy as np
+            return np.zeros(1)
+        if mod.startswith("pandas"):
+            if name == "DataFrame":
+                import pandas as pd
+                return pd.DataFrame()
+            if name == "Series":
+                import pandas as pd
+                return pd.Series(dtype=float)
+    except Exception:
+        return None
+    return None
 
 
 def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):

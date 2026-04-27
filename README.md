@@ -157,6 +157,34 @@ launch("runme", Ghost=True, Real_Time=True)
 | `Ghost`      | `True`  | Bounded dry-run pass that maps the architecture before live trace fires. Enables loop/input guards. |
 | `Real_Time`  | `True`  | Stream pulses to the HUD as they happen instead of buffering. |
 
+#### Ghost mode needs type hints to be useful
+
+The dry-run pass invents mock arguments based on each function's annotated
+parameter types. If a parameter has no annotation it gets `None`, which
+will usually crash on the first attribute access — and that branch of the
+call graph won't be mapped. **For ghost mode to populate more than the
+entry node, every function in the chain needs type hints on its parameters.**
+
+Recognised annotations (smallest possible mock used in each case):
+
+| Annotation                                | Mock value         |
+| ----------------------------------------- | ------------------ |
+| `int`, `str`, `float`, `bool`             | `1`, `"mock_val"`, `1.0`, `True` |
+| `list`, `dict`, `tuple`                   | `[]`, `{}`, `()`   |
+| `torch.Tensor`                            | `torch.zeros(1)`   |
+| `numpy.ndarray`                           | `np.zeros(1)`      |
+| `pandas.DataFrame`, `pandas.Series`       | empty `DataFrame` / `Series` |
+| anything else (custom class, `nn.Module`, dataclass, `TypedDict`, …) | `None` |
+
+ML / scientific libs are detected by qualified name and imported lazily
+— DebugFlow has no hard dependency on torch/numpy/pandas; they're only
+touched when you actually annotate a parameter with one of their types.
+
+For pipelines built around custom classes (a model object, a config
+dataclass, a session, etc.) where mocks aren't viable, set `Ghost=False`
+and let real-time tracing do the work — the live trace doesn't need
+mocks since it watches the real call.
+
 ### Tracing an ML pipeline
 
 ```python

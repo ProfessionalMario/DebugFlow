@@ -16,9 +16,17 @@ from pathlib import Path
 
 
 # --- PATHS -----------------------------------------------------------
-_FLOW_DIR = Path.home() / ".debugflow"
-_FLAG_FILE = _FLOW_DIR / ".debug_on"
-_LOG_FILE  = _FLOW_DIR / "debugflow.log"
+# Flag file lives in the user's home so the ON/OFF toggle is global
+# (one setting applies no matter which project you're in).
+_FLAG_DIR  = Path.home() / ".debugflow"
+_FLAG_FILE = _FLAG_DIR / ".debug_on"
+
+# Log file goes into the project the user ran `flow activate` from.
+# Path.cwd() is resolved at import time, which happens inside the sentinel
+# subprocess that inherits the working directory from the terminal where
+# `flow activate` was run — so this always points at the user's project.
+_LOG_DIR  = Path.cwd() / "logs"
+_LOG_FILE = _LOG_DIR / "debugflow.log"
 # ---------------------------------------------------------------------
 
 
@@ -52,7 +60,7 @@ class LoggerSystem:
             return logger
 
         # --- ON: file-only handler ---
-        _FLOW_DIR.mkdir(parents=True, exist_ok=True)
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
         logger.setLevel(logging.DEBUG)
         logger.handlers.clear()
@@ -87,12 +95,12 @@ def _print_status():
 
 def logs_on():
     """Entry point for `flow-logs on`."""
-    _FLOW_DIR.mkdir(parents=True, exist_ok=True)
+    _FLAG_DIR.mkdir(parents=True, exist_ok=True)
     _FLAG_FILE.touch()
 
     print("\n" + "─" * 45)
     print("  ✔  NEURALFLOW LOGGING: ENABLED")
-    print(f"  Log file → {_LOG_FILE}")
+    print(f"  Log file → <your_project>/logs/debugflow.log")
     print("  Restart `flow activate` to apply to the sentinel.")
     print("─" * 45 + "\n")
 
@@ -105,7 +113,7 @@ def logs_off():
     print("\n" + "─" * 45)
     print("  ✖  NEURALFLOW LOGGING: DISABLED")
     print("  No data will be written to disk.")
-    print("  Restart `flow activate` to apply to the sentinel.")
+    print("  Run `flow activate` again to apply.")
     print("─" * 45 + "\n")
 
 

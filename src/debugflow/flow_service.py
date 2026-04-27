@@ -296,6 +296,11 @@ def activate():
     print("  • CTRL + ALT + F : Toggle HUD & Ghost Sync")
     print("  • CTRL + S       : Auto-Trace (If HUD is open)")
     print("  • flow activate  : Deactivate NeuralFlow")
+    print("─" * 50)
+    print("  [LOGGING]")
+    print("  • flow-logs on   : Enable debug log  → ./logs/debugflow.log")
+    print("  • flow-logs off  : Disable logging")
+    print("  • flow-logs status : Check current state")
     print("═" * 50)
     print("  Sentinel is monitoring the nervous system...\n")
 

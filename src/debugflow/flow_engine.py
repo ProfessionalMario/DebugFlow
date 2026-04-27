@@ -70,8 +70,10 @@ class FlowEngine:
                 log.info("🤝 HUD Link Verified.")
         except Exception:
             log.warning("⚠️ HUD missing. Spawning UI...")
-            hud_script = os.path.join(os.path.dirname(__file__), "flow_hud.py")
-            _popen_detached([sys.executable, hud_script])
+            env = os.environ.copy()
+            env["FLOW_UI_ALLOWED"] = "TRUE"
+            # Use -m so relative imports inside flow_hud.py resolve correctly
+            _popen_detached([sys.executable, "-m", "debugflow.flow_hud"], env=env)
             time.sleep(1.2)
 
         try:

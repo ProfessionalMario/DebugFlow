@@ -1,5 +1,5 @@
 # build artifacts
-.vscode
+.vscode/
 .replit
 dist/
 build/

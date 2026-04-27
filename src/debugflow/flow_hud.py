@@ -83,14 +83,27 @@ def open_in_editor(file_path, line_no):
 
 
 def _format_duration(ms):
-    """Compact, glanceable duration label for the hover overlay."""
+    """
+    Glanceable duration label for the hover overlay.
+    Uses compound whole units (e.g. ``1s 234ms``, ``2m 30s``, ``1h 5m``)
+    instead of long fractional values like ``1.234567s`` so the value
+    is readable at a glance regardless of magnitude.
+    """
     if ms is None:
         return ""
     if ms < 1.0:
-        return f"{ms*1000:.0f}μs"
+        return f"{round(ms * 1000)}\u03bcs"
     if ms < 1000.0:
-        return f"{ms:.1f}ms"
-    return f"{ms/1000:.2f}s"
+        return f"{round(ms)}ms"
+    total_ms = int(round(ms))
+    seconds, rem_ms = divmod(total_ms, 1000)
+    if seconds < 60:
+        return f"{seconds}s {rem_ms}ms" if rem_ms else f"{seconds}s"
+    minutes, rem_s = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {rem_s}s" if rem_s else f"{minutes}m"
+    hours, rem_m = divmod(minutes, 60)
+    return f"{hours}h {rem_m}m" if rem_m else f"{hours}h"
 
 WIN_HEIGHT= 850
 WIN_WIDTH= 400
@@ -269,22 +282,40 @@ class FlowHUD:
 
     def _click_callback(self, sender, app_data):
         """
-        Hit-test the click against every visible node's center; if within a
-        small radius, open that function's source file at its definition line.
-        Clicks inside the DragHandle are ignored so window-drag still works.
+        Hit-test the click against every visible node's full visible card,
+        not just the orb.  The card is a rectangle that wraps the orb, the
+        function name to the right, and the returns line below — matching
+        what the user perceives as "the node".  The params line above the
+        orb is intentionally excluded so a click on parameter text stays a
+        no-op (per UX request).  Clicks inside the DragHandle are ignored
+        so window-drag still works.
         """
         try:
             if dpg.is_item_hovered("DragHandle"):
                 return
-            m_pos = dpg.get_mouse_pos(local=True)
+            mx, my = dpg.get_mouse_pos(local=True)
             for node in self.node_map:
                 nx, ny = node["pos"]
                 ny_off = ny + self.scroll_offset
-                # Cull off-screen nodes
-                if not (0 < ny_off < WIN_HEIGHT):
+                # Loosened cull: a node whose orb has just scrolled off the
+                # top/bottom can still have its returns text visible inside
+                # the canvas, so allow a 30px slack on either side.
+                if not (-30 < ny_off < WIN_HEIGHT + 30):
                     continue
-                dist = math.sqrt((m_pos[0] - nx) ** 2 + (m_pos[1] - ny_off) ** 2)
-                if dist < 25:
+                # --- Rectangular hit-zone ---
+                # Geometry constants here mirror _draw_node:
+                #   params  drawn at y = ny_off - 28      (excluded)
+                #   orb     centered at (nx, ny_off)
+                #   name    drawn from x = nx + 20, y = ny_off - 9  (size 16)
+                #   returns drawn at y = ny_off + 14      (size 14)
+                # Default DPG font: ~8 px per glyph at sizes 14-16.
+                name_w = len(node.get("name") or "") * 8
+                ret_w = len(node.get("returns") or "") * 8
+                left = nx - 18                        # left edge of the orb
+                right = nx + 22 + max(name_w, ret_w)  # past the longer text
+                top = ny_off - 12                     # below params, above orb
+                bottom = ny_off + 28                  # bottom of returns text
+                if left <= mx <= right and top <= my <= bottom:
                     f = node.get("file")
                     ln = node.get("line")
                     if f:
@@ -293,6 +324,8 @@ class FlowHUD:
                         threading.Thread(
                             target=open_in_editor, args=(f, ln), daemon=True
                         ).start()
+                    # Stop after the first match so an overlap (if NODE_SPACING
+                    # ever shrinks) can never fire two editor launches at once.
                     return
         except Exception as e:
             log.error(f"Click handler error: {e}")
@@ -492,9 +525,11 @@ class FlowHUD:
                         # --- HOVER METADATA OVERLAY ---
                         # When the cursor is near a node, surface the source
                         # module and total time the call took. Sits below the
-                        # 'returns' line, smaller (12px) and dimmer cyan so it
-                        # reads as metadata rather than primary content. Stays
-                        # inside the existing palette — no new theme colors.
+                        # 'returns' line in dimmer cyan so it reads as
+                        # metadata rather than primary content. Size 14
+                        # (matches params/returns) so the timing info is
+                        # legible at typical viewing distance without
+                        # competing with the function name.
                         if dist < 45:
                             mod = node.get("module") or ""
                             dur = _format_duration(node.get("duration_ms"))
@@ -502,10 +537,10 @@ class FlowHUD:
                             if parts:
                                 meta_text = " · ".join(parts)
                                 dpg.draw_text(
-                                    pos=[nx - (len(meta_text) * 3.2), ny_off + 32],
+                                    pos=[nx - (len(meta_text) * 3.8), ny_off + 34],
                                     text=meta_text,
                                     color=[120, 200, 230, m_alpha],
-                                    size=12,
+                                    size=14,
                                     parent="NerveCanvas",
                                 )
 

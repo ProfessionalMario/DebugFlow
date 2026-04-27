@@ -315,14 +315,6 @@ Pull requests welcome. The codebase is small and well-commented; a tour:
 | `src/debugflow/animation.py`     | Pulse + node animator (heartbeat, glow)       |
 | `src/debugflow/logger_system.py` | File logger with project-rooted log path      |
 
-Before submitting:
-
-1. Reproduce your fix end-to-end with `flow-logs on` enabled — the log should narrate every step.
-2. If you change socket payload shape, bump the protocol comment in `flow_bridge.py` and update the HUD listener accordingly.
-3. Keep the cyan/teal palette — colour constants live at the top of `flow_hud.py`.
-4. Don't introduce blocking calls in the UI thread; user code runs in a subprocess for a reason.
-
-For larger architectural changes, open an issue first describing the problem and proposed approach.
 
 ---
 

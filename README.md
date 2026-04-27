@@ -275,6 +275,23 @@ flow-logs               # Toggle current state
 - Headless cloud environments (e.g. Replit container) can run the engine but cannot show the HUD — there's no display server and global hotkeys can't bind. Run on a desktop OS to see the HUD.
 - Very long parameter strings still bleed past the 400px HUD column (truncation rules planned).
 - Port `5555` is hard-coded; a process-level conflict will print a clear error in the log but currently requires a manual restart.
+- Things ghost mode can't see without annotations
+
+**Ghost Mode Limits**
+
+- Ghost mode simulates execution using type hints and works best for simple, well-typed functions.
+- Any unannotated parameter is treated as None, which typically causes failures when accessing attributes, indexing, or performing operations.
+- Ghost mode cannot handle most custom or user-defined types, including classes, dataclasses, Pydantic models, ORM objects, and machine learning models like torch.nn.Module.
+- Generic and parameterised types such as list[int], dict[str, int], Optional, Union, and Callable are not matched correctly and fall back to None.
+- Several standard library types like pathlib.Path, datetime, UUID, file handles, and async-related types are not supported.
+- Many scientific and ML ecosystem types, including TensorFlow, JAX, Polars, Dask, Xarray, SciPy, and PIL objects, are also unsupported.
+- Forward references like "MyClass" are treated as plain strings and cannot be resolved to actual types.
+- Method receivers like self and cls are not annotated and become None, so class methods usually fail immediately.
+- Variadic parameters such as *args and **kwargs are not handled correctly and may prevent the function from executing at all.
+- Default parameter values are ignored, so functions are executed with mocked values instead of their defaults.
+- Logic that depends on specific values, such as comparisons, parsing, indexing, or validation, often fails because mock values do not satisfy real conditions.
+- Any dependency on external state, including files, databases, network connections, environment variables, or hardware, will cause failures.
+- Ghost mode is best suited for small, pure functions that use basic built-in types and minimal external dependencies.
 
 **Roadmap:**
 

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "debugflow"
+version = "1.0.0"
+description = "NeuralFlow Logic Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+flow = "debugflow.flow_service:activate"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,2 @@
+[console_scripts]
+flow = debugflow.flow_service:activate

@@ -22,17 +22,24 @@ class Flow:
     def init(sync_id):
         """
         The Shielded Init: Safely establishes the synapse connection.
+
+        Logs go through the file logger (not print) because the engine runs
+        as a detached subprocess with no terminal — print() output is lost.
         """
         try:
             os.environ["FLOW_SYNC_ID"] = sync_id
             with socket.create_connection(("127.0.0.1", 5555), timeout=0.5):
                 Flow._connected = True
+                log.info(f"🤝 Bridge connected to HUD on :5555 (sync_id={sync_id}).")
         except (ConnectionRefusedError, socket.timeout):
             Flow._connected = False
-            print("  ⚠️  [SYNAPSE OFFLINE]: HUD not detected. Running in headless mode.")
+            log.warning(
+                "⚠️ [SYNAPSE OFFLINE]: HUD not detected on 127.0.0.1:5555. "
+                "Running in headless mode — pulses will be dropped silently."
+            )
         except Exception as e:
             Flow._connected = False
-            print(f"  🛑  [INIT_FAILURE]: NeuralFlow could not bridge. Error: {str(e)[:50]}...")
+            log.error(f"🛑 [INIT_FAILURE]: NeuralFlow could not bridge: {e}")
 
     @staticmethod
     def pulse(node, params=None, returns=None, node_type="pulse",

@@ -180,17 +180,38 @@ class FlowHUD:
             while dpg.is_dearpygui_running():
                 try:
                     conn, addr = sock.accept()
-                    log.info(f"[SOCKET] connection from {addr}")
 
-                    data = conn.recv(1024)
+                    # Read until the bridge closes its end. The bridge always
+                    # opens one socket per pulse and closes it after sendall,
+                    # so EOF marks the end of one payload. This avoids the
+                    # 1024-byte truncation that would silently drop pulses
+                    # carrying long file paths + metadata.
+                    chunks = []
+                    conn.settimeout(0.25)
+                    try:
+                        while True:
+                            chunk = conn.recv(4096)
+                            if not chunk:
+                                break
+                            chunks.append(chunk)
+                    except socket.timeout:
+                        pass
+                    finally:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
 
-                    if not data:
+                    if not chunks:
                         continue
 
-                    decoded = data.decode('utf-8')
-                    log.info(f"[HUD RECEIVED] {decoded}")
+                    decoded = b"".join(chunks).decode('utf-8', errors='replace')
 
-                    payload = json.loads(decoded)
+                    try:
+                        payload = json.loads(decoded)
+                    except json.JSONDecodeError as je:
+                        log.error(f"[SOCKET] bad JSON ({len(decoded)}B) from {addr}: {je}")
+                        continue
 
                     self.ui_queue.put(payload)
 

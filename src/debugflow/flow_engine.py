@@ -70,34 +70,61 @@ def _popen_detached(cmd, cwd=None, env=None):
 class FlowEngine:
     @staticmethod
     def ignite_from_service(sync_id):
+        """
+        Engine subprocess entry point. Discovers the user's most recently
+        modified .py file in FLOW_PROJECT_ROOT (or cwd) and runs it as
+        __main__ so any `if __name__ == "__main__": launch(...)` block fires.
+        """
         try:
-            ignore = [
+            # Use FLOW_PROJECT_ROOT first so file discovery is deterministic
+            # even when the engine is spawned by a detached pythonw.exe whose
+            # cwd may have drifted to C:\Users\<name>.
+            project_root = os.environ.get("FLOW_PROJECT_ROOT") or os.getcwd()
+            log.info(f"🔍 Engine scanning project root: {project_root}  (sync_id={sync_id})")
+
+            ignore = {
                 "flow_service.py",
                 "flow_engine.py",
                 "logger_system.py",
                 "flow_hud.py",
                 "flow_bridge.py",
-            ]
-            project_files = [
-                f for f in os.listdir(".") if f.endswith(".py") and f not in ignore
-            ]
-
-            if not project_files:
-                log.error("❌ No user scripts found.")
+                "animation.py",
+            }
+            try:
+                all_py = [
+                    f for f in os.listdir(project_root)
+                    if f.endswith(".py") and f not in ignore
+                ]
+            except FileNotFoundError:
+                log.error(f"❌ Project root does not exist: {project_root}")
                 return
 
-            target_script = max(project_files, key=os.path.getmtime)
-            log.info(f"🔥 Auto-booting: {target_script}")
+            if not all_py:
+                log.error(
+                    f"❌ No user .py scripts in {project_root}. "
+                    "Make sure `flow activate` was run from the right folder."
+                )
+                return
+
+            # Pick the most recently modified file — that's almost always the
+            # one the user just saved with Ctrl+S.
+            target_script = max(
+                all_py, key=lambda f: os.path.getmtime(os.path.join(project_root, f))
+            )
+            target_abs = os.path.join(project_root, target_script)
+            log.info(
+                f"🔥 Auto-booting most-recent script: {target_script}  "
+                f"(of {len(all_py)} candidate{'s' if len(all_py) != 1 else ''})"
+            )
 
             os.environ["FLOW_SYNC_ID"] = sync_id
 
-            spec = importlib.util.spec_from_file_location(
-                "__main__", os.path.abspath(target_script)
-            )
+            spec = importlib.util.spec_from_file_location("__main__", target_abs)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            log.info(f"✅ Engine finished executing {target_script}.")
         except Exception as e:
-            log.critical(f"💥 Engine Discovery Crash: {e}")
+            log.critical(f"💥 Engine Discovery Crash: {e}", exc_info=True)
 
     @staticmethod
     def run_target(script_path, target_func, sync_id, params=None):

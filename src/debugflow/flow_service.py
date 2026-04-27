@@ -165,24 +165,40 @@ class FlowSentinel:
         Triggered by Ctrl+S.
         Ignites the engine only when the HUD is physically alive in the OS.
         """
+        # Loud entry log — confirms pynput actually delivered the hotkey.
+        log.info("⌨️  Ctrl+S received — log_save_event() fired.")
+
         if self._is_debouncing():
+            log.info("⏱️  Ctrl+S debounce active (<0.7s since last). Skipping.")
             return
 
         try:
             active_hud_pid = self._get_pid_from_file(self.hud_pid_file)
             if not (active_hud_pid and psutil.pid_exists(active_hud_pid)):
+                log.warning(
+                    "🚫 Ctrl+S ignored: HUD is not running. "
+                    "Press Ctrl+Alt+F first to open the HUD."
+                )
                 return
+            log.info(f"🤝 HUD alive (PID {active_hud_pid}). Proceeding with engine ignite.")
 
             old_engine_pid = self._get_pid_from_file(self.engine_pid_file)
             if old_engine_pid and psutil.pid_exists(old_engine_pid):
                 try:
                     psutil.Process(old_engine_pid).terminate()
                     log.info(f"🔪 Terminated stale engine (PID {old_engine_pid})")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"Could not terminate stale engine PID {old_engine_pid}: {e}")
 
             sync_id = str(uuid.uuid4())[:8]
-            log.info(f"📡 HUD Linked. Launching Session: {sync_id}")
+
+            # Pin the engine subprocess cwd to the user's project so file
+            # discovery in ignite_from_service() is deterministic (instead of
+            # inheriting whatever cwd the sentinel happens to have).
+            project_root = os.environ.get("FLOW_PROJECT_ROOT") or os.getcwd()
+            log.info(
+                f"📡 Launching engine session {sync_id} from project root: {project_root}"
+            )
 
             # Always reference the installed package so this works outside the src/ tree
             engine_cmd = (
@@ -192,15 +208,16 @@ class FlowSentinel:
                 f"FlowEngine.ignite_from_service({repr(sync_id)})"
             )
 
-            # Same fix as ghost pipeline — no cwd override so the engine
-            # scans the user's project directory, not the package source.
             new_engine = subprocess.Popen(
                 [PYTHON_EXE, "-c", engine_cmd],
+                cwd=project_root,
                 **_make_flags(detached=False),
             )
 
             with open(self.engine_pid_file, "w") as f:
                 f.write(str(new_engine.pid))
+
+            log.info(f"🚀 Engine spawned (PID {new_engine.pid}).")
 
         except Exception as e:
             log.error(f"Failed to sync save event: {e}")

@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import threading
 import psutil
 import traceback
 import uuid
@@ -18,6 +19,134 @@ try:
     _KEYBOARD_AVAILABLE = True
 except Exception:
     _KEYBOARD_AVAILABLE = False
+
+
+# --- CHORD WATCHER -----------------------------------------------------------
+# Replacement for pynput.GlobalHotKeys.
+#
+# pynput.GlobalHotKeys tracks press/release internally. On Windows, when a
+# focused window consumes a key (e.g. VS Code eating Ctrl+S, or the HUD
+# spawning and stealing focus on Ctrl+Alt+F), pynput's hook receives the
+# press but the matching release is swallowed by the focused window. The
+# letter key ("F" / "S") then stays "stuck" in pynput's internal state, and
+# the very next press of Ctrl+Alt instantly satisfies the stale chord —
+# producing the symptom the user reported: HUD toggling on Ctrl+Alt alone,
+# Ctrl+Alt+S re-toggling the HUD instead of firing the trigger.
+#
+# This watcher rebuilds the press-set ourselves from raw key events and
+# fires a chord only when:
+#   1. The pressed set EXACTLY equals the chord (no extra keys, no missing
+#      keys). Subset matching would let a stuck letter from a prior chord
+#      bleed into the next one.
+#   2. The press is not an autorepeat.
+#   3. Per-chord cooldown (0.4s) hasn't fired yet.
+#
+# IMPORTANT: after firing, we proactively remove the non-modifier ("trigger")
+# keys of the chord from our internal pressed set. That's the actual cure for
+# the reported bug — even if the OS drops the F key-up event because the HUD
+# stole focus on the press, our internal state is already correct, so the
+# next Ctrl+Alt+S press will match its chord exactly instead of arriving
+# with a phantom F still attached.
+# -----------------------------------------------------------------------------
+
+_MODIFIER_IDS = frozenset({"ctrl", "alt", "shift", "cmd"})
+
+def _parse_chord(spec: str) -> frozenset:
+    """Parse '<ctrl>+<alt>+f' (pynput grammar) → frozenset of canonical ids."""
+    parts = [p.strip() for p in spec.split("+") if p.strip()]
+    out = set()
+    for p in parts:
+        name = p.strip("<>").lower()
+        if name in ("ctrl", "control"):
+            out.add("ctrl")
+        elif name in ("alt", "alt_gr"):
+            out.add("alt")
+        elif name == "shift":
+            out.add("shift")
+        elif name in ("cmd", "super", "win"):
+            out.add("cmd")
+        else:
+            out.add(name)  # f1..f12, single chars, space, tab, etc.
+    return frozenset(out)
+
+
+def _canon_key(key) -> str:
+    """Convert a pynput Key/KeyCode → canonical id matching _parse_chord."""
+    if not _KEYBOARD_AVAILABLE:
+        return None
+    Key = _pynput_kb.Key
+    if isinstance(key, Key):
+        n = key.name
+        if n in ("ctrl_l", "ctrl_r"):
+            return "ctrl"
+        if n in ("alt_l", "alt_r", "alt_gr"):
+            return "alt"
+        if n in ("shift_l", "shift_r"):
+            return "shift"
+        if n in ("cmd_l", "cmd_r"):
+            return "cmd"
+        return n  # f1..f12, space, tab, esc, etc.
+    # KeyCode (regular character)
+    char = getattr(key, "char", None)
+    if char:
+        return char.lower()
+    return None
+
+
+class ChordWatcher:
+    """Fires registered callbacks when exact key chords go down."""
+
+    def __init__(self, hotkeys: dict):
+        # hotkeys: {chord_string -> callback}
+        self.chord_to_cb = {_parse_chord(k): cb for k, cb in hotkeys.items()}
+        self.pressed = set()
+        self.last_fire = {}
+        self.cooldown = 0.4
+        self.lock = threading.Lock()
+        self._listener = None
+
+    def _on_press(self, key):
+        c = _canon_key(key)
+        if c is None:
+            return
+        with self.lock:
+            if c in self.pressed:
+                return  # autorepeat — ignore
+            self.pressed.add(c)
+            for chord, cb in self.chord_to_cb.items():
+                # Rule 1: pressed set must EXACTLY equal the chord. No extra
+                # keys allowed (so a stuck letter from a prior chord cannot
+                # contaminate this one) and no missing keys (so a partial
+                # press like Ctrl+Alt cannot fire a Ctrl+Alt+letter chord).
+                if self.pressed == chord:
+                    now = time.time()
+                    if now - self.last_fire.get(chord, 0.0) > self.cooldown:
+                        self.last_fire[chord] = now
+                        # Proactively clear the chord's non-modifier keys
+                        # from our internal state. If the OS later drops the
+                        # key-up because focus was stolen by the HUD, our
+                        # state is already correct — the letter is "released"
+                        # as far as we're concerned. Modifiers stay tracked
+                        # because users frequently hold Ctrl/Alt across
+                        # successive shortcuts.
+                        self.pressed -= (chord - _MODIFIER_IDS)
+                        # Run on a thread so the listener loop never blocks
+                        threading.Thread(target=cb, daemon=True).start()
+                        return
+
+    def _on_release(self, key):
+        c = _canon_key(key)
+        if c is None:
+            return
+        with self.lock:
+            self.pressed.discard(c)
+
+    def join(self):
+        with _pynput_kb.Listener(
+            on_press=self._on_press, on_release=self._on_release
+        ) as l:
+            self._listener = l
+            l.join()
 
 
 # --- PLATFORM-SAFE SUBPROCESS HELPERS ---
@@ -321,9 +450,11 @@ class FlowSentinel:
                 hud_hotkey: self.toggle_hud,
                 trigger_hotkey: self.log_save_event,
             }
-            with _pynput_kb.GlobalHotKeys(hotkeys) as hk:
-                log.info("System Hooks Active. Sentinel in Standby.")
-                hk.join()
+            # ChordWatcher (custom) instead of pynput.GlobalHotKeys — see the
+            # comment block at the top of this file for why.
+            watcher = ChordWatcher(hotkeys)
+            log.info("System Hooks Active (ChordWatcher). Sentinel in Standby.")
+            watcher.join()
         except ValueError as e:
             # pynput raises ValueError on a malformed HotKey grammar. Be loud
             # so the user knows their env var was rejected before the sentinel

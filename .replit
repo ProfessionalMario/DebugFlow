@@ -26,4 +26,4 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pip install -r requirements.txt -q && pip install -e . -q && python run.py"
+args = "pip install psutil dearpygui -q && pip install pynput --only-binary :all: -q || true && pip install -e . -q && python run.py"

@@ -11,6 +11,12 @@ import platform
 from . import log
 from .flow_bridge import Flow
 
+# --- GHOST FLOW LOOP GUARD ---
+# Maximum number of trace_calls 'call' events allowed during a single ghost pass.
+# Prevents infinite loops in the user's code from flooding the HUD forever.
+MAX_GHOST_CALLS = 50
+_ghost_call_count = [0]  # Mutable list — mutated inside trace_calls without needing `global`
+
 
 # --- PLATFORM-SAFE SUBPROCESS HELPERS ---
 def _popen_detached(cmd, cwd=None, env=None):
@@ -135,14 +141,35 @@ def trace_calls(frame, event, arg):
         )
 
         is_rt = os.environ.get("FLOW_REAL_TIME") == "TRUE"
+        is_ghost = os.environ.get("FLOW_MODE") == "SIMULATION"
 
         if event == "call":
+            # --- GHOST LOOP GUARD ---
+            # Count every call during a ghost pass. If we exceed the limit,
+            # the user's code has an infinite (or very deep) loop — stop tracing
+            # and let the ghost pass finish naturally rather than flood the HUD.
+            if is_ghost:
+                _ghost_call_count[0] += 1
+                if _ghost_call_count[0] > MAX_GHOST_CALLS:
+                    log.warning(
+                        f"⚠️ Ghost overflow: {MAX_GHOST_CALLS} calls reached. "
+                        "Stopping trace to prevent infinite loop."
+                    )
+                    Flow.pulse(
+                        "GHOST: OVERFLOW",
+                        params={"limit": MAX_GHOST_CALLS},
+                        node_type="nuke",
+                    )
+                    sys.settrace(None)
+                    return None
+
             # Capture the live local variables at call time.
             # These are the actual param values the function received, enabling
             # accurate type-gate validation inside Flow.pulse.
             live_params = dict(frame.f_locals)
             Flow.pulse(fn_obj or func_name, params=live_params, node_type="processing")
-            if not is_rt:
+            if not is_rt and not is_ghost:
+                # Cinematic delay only in live mode — ghost runs instantly
                 time.sleep(1.0)
 
         elif event == "exception":
@@ -153,7 +180,8 @@ def trace_calls(frame, event, arg):
         elif event == "return":
             # arg is the actual return value from Python's trace protocol
             Flow.pulse(fn_obj or func_name, returns=arg, node_type="success")
-            if not is_rt:
+            if not is_rt and not is_ghost:
+                # Cinematic delay only in live mode
                 time.sleep(0.5)
 
     return trace_calls
@@ -261,6 +289,15 @@ def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):
 
             secure_gate(mode="SIMULATION")
 
+            # Patch time.sleep → instant so the user's code doesn't block the ghost pass.
+            # Any sleep call in user code would freeze the ghost run for real seconds,
+            # defeating the purpose of a fast non-destructive dry run.
+            _orig_sleep = time.sleep
+            time.sleep = lambda s=0: None
+
+            # Reset the loop guard counter before every new ghost pass.
+            _ghost_call_count[0] = 0
+
             # Build mock params respecting each parameter's annotation
             sig = inspect.signature(target_func)
             mock_params = {
@@ -275,6 +312,7 @@ def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):
                     log.debug(f"ℹ️ Ghost Scout path break: {e}")
             finally:
                 sys.settrace(None)
+                time.sleep = _orig_sleep  # Always restore real sleep
 
         else:
             # --- LIVE EXECUTION PASS ---

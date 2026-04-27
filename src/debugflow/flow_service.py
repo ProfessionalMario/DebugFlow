@@ -14,7 +14,7 @@ except ImportError:
     log = logging.getLogger("debugflow")
 
 try:
-    import keyboard
+    from pynput import keyboard as _pynput_kb
     _KEYBOARD_AVAILABLE = True
 except Exception:
     _KEYBOARD_AVAILABLE = False
@@ -206,34 +206,35 @@ class FlowSentinel:
             log.error(f"Failed to sync save event: {e}")
 
     def start_listening(self):
-        """Entry point for the background daemon — binds hotkeys and waits."""
+        """
+        Entry point for the background daemon.
+        Binds Ctrl+Alt+F and Ctrl+S using pynput GlobalHotKeys, which works
+        cross-platform without needing root on Linux desktop environments.
+        """
         if not _KEYBOARD_AVAILABLE:
-            msg = (
-                "  ⚠️  [HOTKEYS UNAVAILABLE]: The 'keyboard' library could not be loaded.\n"
-                "  On Linux/Mac you may need to run as root: sudo flow activate\n"
-                "  On Windows, ensure the package is installed: pip install keyboard"
+            print(
+                "  ⚠️  [HOTKEYS UNAVAILABLE]: pynput could not be loaded.\n"
+                "  On Linux ensure a display server (X11/Wayland) is running.\n"
+                "  Install manually: pip install pynput"
             )
-            print(msg)
-            log.error("Keyboard library unavailable. Sentinel cannot bind hotkeys.")
-            # Keep the process alive so the PID file stays valid
+            log.error("pynput unavailable. Sentinel will idle without hotkeys.")
+            # Keep the process alive so the PID file stays valid — do not exit.
             while True:
                 time.sleep(10)
             return
 
+        log.info("⌨️  Binding hotkeys via pynput...")
         try:
-            keyboard.unhook_all()
-            keyboard.add_hotkey("ctrl+alt+f", self.toggle_hud)
-            keyboard.add_hotkey("ctrl+s", self.log_save_event)
-            log.info("System Hooks Active. Sentinel in Standby.")
-            keyboard.wait()
-        except PermissionError:
-            print(
-                "  ⚠️  [PERMISSION DENIED]: Hotkeys require elevated privileges.\n"
-                "  Try running: sudo flow activate"
-            )
-            log.error("PermissionError: Cannot bind hotkeys without elevated privileges.")
+            hotkeys = {
+                "<ctrl>+<alt>+f": self.toggle_hud,
+                "<ctrl>+s": self.log_save_event,
+            }
+            with _pynput_kb.GlobalHotKeys(hotkeys) as hk:
+                log.info("System Hooks Active. Sentinel in Standby.")
+                hk.join()
         except Exception as e:
             log.error(f"Sentinel Loop Fatal Error: {e}")
+            print(f"  ⚠️  [SENTINEL ERROR]: {e}")
 
 
 def is_service_running():

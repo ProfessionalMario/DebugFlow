@@ -311,6 +311,56 @@ def activate():
     print("  Sentinel is monitoring the nervous system...\n")
 
 
+def _print_usage():
+    print("\n" + "═" * 50)
+    print("  flow — NeuralFlow Logic Engine CLI")
+    print("═" * 50)
+    print("  Usage:")
+    print("    flow activate            Toggle the NeuralFlow sentinel on/off")
+    print("    flow status              Show whether the sentinel is running")
+    print("    flow help                Show this message")
+    print()
+    print("  Logging (separate command):")
+    print("    flow-logs on | off | status")
+    print("═" * 50 + "\n")
+
+
+def _print_status():
+    proc = is_service_running()
+    if proc:
+        print(f"\n  ● NEURALFLOW: RUNNING  (PID {proc.pid})\n")
+    else:
+        print("\n  ○ NEURALFLOW: STOPPED\n")
+
+
+def main():
+    """
+    Top-level CLI dispatcher for the `flow` command.
+
+    Only the explicit `activate` subcommand toggles the sentinel.
+    Bare `flow`, `flow help`, or any unknown subcommand (e.g. `flow loggies`,
+    `flow xyz`) prints usage instead of silently activating, which used to
+    happen when this entry point was wired straight to activate().
+    """
+    args = sys.argv[1:]
+
+    if not args:
+        _print_usage()
+        return
+
+    cmd = args[0].lower()
+
+    if cmd == "activate":
+        activate()
+    elif cmd in ("status", "state"):
+        _print_status()
+    elif cmd in ("help", "-h", "--help"):
+        _print_usage()
+    else:
+        print(f"\n  ⚠️  Unknown command: 'flow {cmd}'")
+        _print_usage()
+
+
 if __name__ == "__main__":
     try:
         sentinel = FlowSentinel()

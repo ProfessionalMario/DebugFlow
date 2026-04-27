@@ -1,5 +1,5 @@
 [console_scripts]
-flow = debugflow.flow_service:activate
+flow = debugflow.flow_service:main
 flow-logs = debugflow.logger_system:toggle_logs_cli
 flow-logs-off = debugflow.logger_system:logs_off
 flow-logs-on = debugflow.logger_system:logs_on

@@ -22,10 +22,16 @@ test.py                  — Dev test script
 | Command | Function |
 |---|---|
 | `flow activate` | Toggle the NeuralFlow sentinel on/off |
+| `flow status` | Print whether the sentinel daemon is currently running |
+| `flow help` | Show CLI usage |
 | `flow-logs on` | Enable file logging persistently |
 | `flow-logs off` | Disable file logging (complete silence) |
 | `flow-logs status` | Show current logging state |
 | `python run.py` | Replit workflow — verifies all modules load |
+
+> The `flow` command is a real subcommand dispatcher (`flow_service.main`).
+> Bare `flow` or any unknown subcommand (`flow loggies`, `flow xyz`) prints
+> usage instead of accidentally toggling the sentinel.
 
 ## Logging
 
@@ -48,13 +54,41 @@ The dual-gate compares live params/returns against the function's annotations us
 ### Platform Safety (flow_service.py, flow_engine.py)
 `_make_flags()` returns `creationflags` only on Windows.  
 On Linux/Mac the dict is empty, so `subprocess.Popen` doesn't raise `ValueError`.  
-`keyboard` import is guarded — if unavailable (no root on Linux), the sentinel prints an actionable message and stays alive.
+Hotkeys use `pynput.GlobalHotKeys` (cross-platform: Windows / Mac / Linux/X11)
+instead of the `keyboard` library, which required root on Linux. The import is
+guarded — if `pynput` can't load (e.g. no display server), the sentinel prints
+an actionable message and idles instead of crashing.
+
+### User-Input & Loop Tolerance (flow_engine.py)
+The ghost (dry-run) pass is bounded three ways so a user's traced code can't
+hang the HUD:
+
+* `MAX_GHOST_CALLS` (50) — hard cap on traced `call` events per pass.
+* `MAX_GHOST_SECONDS` (3.0) — wall-clock budget for the whole ghost pass.
+* `MAX_GHOST_INPUTS` (5) — the patched `input()` returns `"GHOST_DATA"` for
+  the first N calls, then raises `Ghost Input Trap` so `while True: input()`
+  loops bail out instead of looping forever.
+
+When any guard trips, `_stop_ghost_trace()` removes the trace hook **without**
+firing a `nuke` node. The function that's still running stays in its existing
+`processing` (yellow) state on the HUD, which correctly reflects "this thing
+really is still in progress, we just stopped watching."
+
+In LIVE mode `input()` and `sys.exit` are left untouched so real CLI flows
+work normally.
+
+### Display Formatting (flow_bridge.py)
+`Flow.pulse()` renders params and returns as `type=value` (and dict params as
+`name: type=value, name2: type=value`) before sending to the HUD, so each
+node shows both the data type and the actual value. Output is bounded so it
+fits inside the 400px HUD column. CRIT_FAIL strings from the type-gate are
+left untouched.
 
 ## Dependencies
 
 ```
 dearpygui==2.3      — HUD rendering (Windows/Mac GUI)
-keyboard==0.13.5    — System-wide hotkeys (needs root on Linux)
+pynput>=1.7.6       — System-wide hotkeys (cross-platform, no root needed)
 psutil==7.2.2       — Process management
 ```
 

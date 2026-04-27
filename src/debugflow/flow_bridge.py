@@ -117,6 +117,22 @@ class Flow:
                 except Exception:
                     pass
 
+            # --- DISPLAY FORMATTING ---
+            # Render `type=value` (or `name: type=value` for dict params) so the
+            # HUD shows both the data type and its actual value at every node.
+            # Skip this when the type-gate already replaced the field with a
+            # CRIT_FAIL message (those are ready-to-display strings).
+            if final_type != "nuke":
+                if isinstance(display_params, dict):
+                    display_params = (
+                        _format_params_dict(display_params) if display_params else None
+                    )
+                elif display_params is not None and not isinstance(display_params, str):
+                    display_params = _format_typed_value(display_params)
+
+                if display_returns is not None and not isinstance(display_returns, str):
+                    display_returns = _format_typed_value(display_returns)
+
             payload = {
                 "run_id": str(Flow.run_id or "DEV_SESH"),
                 "flow_mode": os.environ.get("FLOW_MODE", "SIMULATION"),
@@ -149,3 +165,38 @@ class Flow:
 
 # Keep a safe reference to the real built-in type() so it is never shadowed
 builtins_type = type
+
+
+# --- DISPLAY HELPERS ---
+# Truncate to keep HUD nodes legible inside the 400px window.
+_MAX_VAL_CHARS = 24
+_MAX_FIELD_CHARS = 60
+
+
+def _short_repr(val):
+    """A bounded repr that won't bleed off the side of the HUD."""
+    try:
+        s = repr(val)
+    except Exception:
+        s = f"<unrepr {builtins_type(val).__name__}>"
+    if len(s) > _MAX_VAL_CHARS:
+        s = s[: _MAX_VAL_CHARS - 1] + "…"
+    return s
+
+
+def _format_typed_value(val):
+    """Render a single value as 'type=value' (e.g. 'int=5', 'str="hi"')."""
+    type_name = builtins_type(val).__name__
+    return f"{type_name}={_short_repr(val)}"
+
+
+def _format_params_dict(params):
+    """
+    Render a {param_name: value} dict as 'name: type=value, name2: type=value'.
+    Truncated overall so it fits inside the HUD label area.
+    """
+    parts = [f"{k}: {_format_typed_value(v)}" for k, v in params.items()]
+    out = ", ".join(parts)
+    if len(out) > _MAX_FIELD_CHARS:
+        out = out[: _MAX_FIELD_CHARS - 1] + "…"
+    return out

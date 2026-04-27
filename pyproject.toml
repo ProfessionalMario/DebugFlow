@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-flow         = "debugflow.flow_service:activate"
+flow         = "debugflow.flow_service:main"
 flow-logs    = "debugflow.logger_system:toggle_logs_cli"
 flow-logs-on = "debugflow.logger_system:logs_on"
 flow-logs-off = "debugflow.logger_system:logs_off"

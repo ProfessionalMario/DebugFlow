@@ -11,11 +11,39 @@ import platform
 from . import log
 from .flow_bridge import Flow
 
-# --- GHOST FLOW LOOP GUARD ---
-# Maximum number of trace_calls 'call' events allowed during a single ghost pass.
-# Prevents infinite loops in the user's code from flooding the HUD forever.
+# --- GHOST FLOW LOOP GUARDS ---
+# Bound how much work a single ghost pass can do so a user's `while True:` /
+# blocking input call / runaway recursion never freezes the HUD.
+#
+#   MAX_GHOST_CALLS    — hard cap on trace_calls 'call' events per pass.
+#   MAX_GHOST_SECONDS  — wall-clock cap on the entire ghost pass.
+#   MAX_GHOST_INPUTS   — how many times the patched input() may return
+#                        "GHOST_DATA" before it raises a trap and bails out.
+#                        This is what tames `while True: x = input()` loops.
 MAX_GHOST_CALLS = 50
-_ghost_call_count = [0]  # Mutable list — mutated inside trace_calls without needing `global`
+MAX_GHOST_SECONDS = 3.0
+MAX_GHOST_INPUTS = 5
+
+_ghost_call_count = [0]   # Mutable list → mutate without `global`
+_ghost_start_time = [0.0]
+_ghost_input_count = [0]
+_ghost_aborted = [False]
+
+
+def _stop_ghost_trace(reason: str):
+    """
+    Cleanly stop the ghost trace without firing a 'nuke' node.
+
+    The currently-running function stays in its existing 'processing' state
+    (yellow) on the HUD because no success/exception event is dispatched —
+    which matches the user's expectation: the function really *is* still in
+    progress, we just stopped *watching* it.
+    """
+    if _ghost_aborted[0]:
+        return
+    _ghost_aborted[0] = True
+    log.warning(f"⚠️ Ghost trace stopped: {reason}")
+    sys.settrace(None)
 
 
 # --- PLATFORM-SAFE SUBPROCESS HELPERS ---
@@ -144,23 +172,28 @@ def trace_calls(frame, event, arg):
         is_ghost = os.environ.get("FLOW_MODE") == "SIMULATION"
 
         if event == "call":
-            # --- GHOST LOOP GUARD ---
-            # Count every call during a ghost pass. If we exceed the limit,
-            # the user's code has an infinite (or very deep) loop — stop tracing
-            # and let the ghost pass finish naturally rather than flood the HUD.
+            # --- GHOST LOOP GUARDS ---
+            # During a ghost pass, bound how much we trace so the user's
+            # infinite loops, deep recursion, or blocking input() calls never
+            # freeze the HUD. We *do not* fire a 'nuke' node — the function is
+            # genuinely still in progress, so we leave its existing 'processing'
+            # (yellow) state alone and just stop watching.
             if is_ghost:
                 _ghost_call_count[0] += 1
+
                 if _ghost_call_count[0] > MAX_GHOST_CALLS:
-                    log.warning(
-                        f"⚠️ Ghost overflow: {MAX_GHOST_CALLS} calls reached. "
-                        "Stopping trace to prevent infinite loop."
+                    _stop_ghost_trace(
+                        f"{MAX_GHOST_CALLS} calls reached (likely loop)."
                     )
-                    Flow.pulse(
-                        "GHOST: OVERFLOW",
-                        params={"limit": MAX_GHOST_CALLS},
-                        node_type="nuke",
+                    return None
+
+                if (
+                    _ghost_start_time[0]
+                    and (time.time() - _ghost_start_time[0]) > MAX_GHOST_SECONDS
+                ):
+                    _stop_ghost_trace(
+                        f"{MAX_GHOST_SECONDS}s wall-clock budget exceeded."
                     )
-                    sys.settrace(None)
                     return None
 
             # Capture the live local variables at call time.
@@ -206,11 +239,22 @@ def secure_gate(mode="LIVE"):
                     handler.setLevel(logging.ERROR)
 
     if mode == "SIMULATION":
-        builtins.input = lambda prompt="": "GHOST_DATA"
+        # Bounded input shim: returns mock data for the first MAX_GHOST_INPUTS
+        # calls, then raises a trap so a `while True: x = input()` loop in the
+        # user's code can't pin the ghost pass forever. The trap is caught in
+        # launch() the same way Ghost Exit Trap is.
+        def _ghost_input(prompt=""):
+            _ghost_input_count[0] += 1
+            if _ghost_input_count[0] > MAX_GHOST_INPUTS:
+                raise RuntimeError("Ghost Input Trap")
+            return "GHOST_DATA"
+
+        builtins.input = _ghost_input
         sys.exit = lambda code=None: (_ for _ in ()).throw(
             RuntimeError("Ghost Exit Trap")
         )
     else:
+        # LIVE mode — leave input/exit untouched so real CLI flows work.
         pass
 
 
@@ -295,8 +339,11 @@ def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):
             _orig_sleep = time.sleep
             time.sleep = lambda s=0: None
 
-            # Reset the loop guard counter before every new ghost pass.
+            # Reset every ghost-pass guard before each new run.
             _ghost_call_count[0] = 0
+            _ghost_input_count[0] = 0
+            _ghost_aborted[0] = False
+            _ghost_start_time[0] = time.time()
 
             # Build mock params respecting each parameter's annotation
             sig = inspect.signature(target_func)
@@ -308,7 +355,15 @@ def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):
                 sys.settrace(trace_calls)
                 target_func(**mock_params)
             except Exception as e:
-                if "Ghost Exit Trap" not in str(e):
+                msg = str(e)
+                # Known soft traps — these are how we tame infinite loops and
+                # `while True: input()` patterns. Not real errors; just log low.
+                if (
+                    "Ghost Exit Trap" in msg
+                    or "Ghost Input Trap" in msg
+                ):
+                    log.info(f"ℹ️ Ghost pass bailed out cleanly ({msg}).")
+                else:
                     log.debug(f"ℹ️ Ghost Scout path break: {e}")
             finally:
                 sys.settrace(None)

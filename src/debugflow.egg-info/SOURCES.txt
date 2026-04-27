@@ -1,6 +1,5 @@
 README.md
 pyproject.toml
-setup.py
 src/debugflow/__init__.py
 src/debugflow/animation.py
 src/debugflow/flow_bridge.py
@@ -12,4 +11,6 @@ src/debugflow.egg-info/PKG-INFO
 src/debugflow.egg-info/SOURCES.txt
 src/debugflow.egg-info/dependency_links.txt
 src/debugflow.egg-info/entry_points.txt
+src/debugflow.egg-info/requires.txt
 src/debugflow.egg-info/top_level.txt
+tests/test_chord_watcher.py

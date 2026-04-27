@@ -9,12 +9,21 @@ src/debugflow/
     __init__.py          — package entry, exposes `log`
     flow_bridge.py       — Flow class: socket comms to HUD, type-gate validation
     flow_engine.py       — FlowEngine + trace_calls + launch() entrypoint
-    flow_service.py      — FlowSentinel: hotkey daemon, HUD lifecycle
+    flow_service.py      — FlowSentinel + ChordWatcher: hotkey daemon, HUD lifecycle
     flow_hud.py          — Dear PyGui HUD window
     animation.py         — Animator: spine, pulses, ripples
     logger_system.py     — File-only logger (no terminal pollution)
+scripts/
+    build_demo_gifs.py   — Pillow-only demo GIF generator (no GUI required)
+tests/
+    test_chord_watcher.py — Headless unit tests for the hotkey state machine
 run.py                   — Package verification + Replit workflow entry point
 test.py                  — Dev test script
+images/
+    image.png            — Real HUD ghost-pass snapshot
+    demo_pulse.gif       — README demo: live call flow
+    demo_returns.gif     — README demo: return + exception flow
+    demo_hover.gif       — README demo: hover metadata overlay
 ```
 
 ## Entry Points
@@ -80,6 +89,33 @@ to 1.2s because pynput on Windows can re-detect `Ctrl+Alt+<letter>` as the
 user releases keys in non-uniform order — a wide guard prevents the second
 fire from instantly closing the HUD that the first fire just opened.
 
+### ChordWatcher (flow_service.py)
+Custom replacement for `pynput.GlobalHotKeys`. Two real-world bugs forced this:
+
+1. **Stuck letter after focus steal.** When Ctrl+Alt+F opens the HUD, the OS
+   delivers the F key-up to the new HUD window instead of pynput's hook.
+   `GlobalHotKeys` then keeps F as "still pressed" — the *next* time the
+   user holds Ctrl+Alt for any other shortcut, the stale F instantly
+   re-fires the HUD chord. ChordWatcher fixes this by clearing the
+   non-modifier keys of a chord from its own `pressed` set the moment the
+   chord fires, regardless of what release events arrive later.
+
+2. **Ctrl/Alt-mangled letter never matches.** With Ctrl held, Windows sends
+   F as `KeyCode(char='\\x06', vk=70)`. `char.lower()` gives `"\\x06"`, which
+   never matches the parsed chord `{"ctrl", "alt", "f"}` — the chord
+   silently never fires (the user-reported regression). Two safety nets:
+   * Run every event through `Listener.canonical(key)` so pynput un-mangles
+     it via the OS keymap.
+   * If `.char` is still `None` or non-printable, fall back to the virtual
+     key code (`.vk`) using a fixed `_VK_TO_NAME` map (A–Z, 0–9, F1–F24).
+   The listener is constructed and assigned to `self._listener` *before*
+   `start()` so even the very first press has a canonicaliser available.
+
+Covered by `tests/test_chord_watcher.py` — 12 headless tests synthesising
+both the clean Windows case and the mangled-char case, including the
+two-chord interleave bug from (1) above. Tests stub out pynput entirely
+so they run in any environment, including the headless Replit container.
+
 ### User-Input & Loop Tolerance (flow_engine.py)
 The ghost (dry-run) pass is bounded three ways so a user's traced code can't
 hang the HUD:
@@ -138,10 +174,34 @@ dimmer use of the existing palette so it reads as metadata.
 ## Dependencies
 
 ```
-dearpygui==2.3      — HUD rendering (Windows/Mac GUI)
+dearpygui>=2.0,<3   — HUD rendering (Windows/Mac GUI)
 pynput>=1.7.6       — System-wide hotkeys (cross-platform, no root needed)
-psutil==7.2.2       — Process management
+psutil>=5.9         — Process management
 ```
+
+These are declared in `pyproject.toml`'s `[project].dependencies`. An earlier
+release shipped with `dependencies = []`, which made `pip install debugflow`
+silently land an unimportable package on user machines — the wheel installed
+fine but `flow activate` blew up on the first `import psutil`. Always run the
+packaging smoke test before tagging a release:
+
+```bash
+python -m build --no-isolation
+pip install --target /tmp/wc --no-deps dist/debugflow-*.whl
+PYTHONPATH=/tmp/wc python -c "from debugflow.flow_service import main, ChordWatcher"
+```
+
+## Packaging Notes
+
+* `pyproject.toml` is the single source of truth. The legacy `setup.py`
+  (which declared `version="0.1.0"` while pyproject said `1.0.1`) was
+  removed — having both was a recipe for "which file did pip read?" bugs.
+* Runtime state files (`.hud_pid`, `.engine_pid`, `.die`) are excluded from
+  the wheel via `[tool.setuptools.exclude-package-data]`, so the wheel
+  doesn't ship the build machine's stale PIDs to every install.
+* Build the wheel + sdist with `python -m build --no-isolation` (the
+  `--no-isolation` flag avoids a Replit-specific failure where the build
+  bootstrap can't resolve its own `setuptools`/`wheel` requirements).
 
 ## Running on Replit
 

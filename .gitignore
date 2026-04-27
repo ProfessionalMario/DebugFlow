@@ -1,16 +1,17 @@
-# build artifacts
+# IDE
 .vscode/
-.replit
+
+# Python
+__pycache__/
+*.pyc
+
+# build
 dist/
 build/
 *.egg-info/
 
 # logs
 logs/
-
-# python
-__pycache__/
-*.pyc
 
 # env
 .env

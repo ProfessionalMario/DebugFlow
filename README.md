@@ -12,7 +12,7 @@ Built for two audiences:
 ## Quick Demo
 
 ```text
-flow activate                  # Start the background sentinel
+debugflow activate                  # Start the background sentinel
                                # press Ctrl+Alt+F to summon the HUD
                                # press Ctrl+Alt+S to fire your script
 ```
@@ -59,11 +59,11 @@ Dependencies (auto-installed):
 
 ## Minimal Usage
 
-### Option 1 — Hotkey-driven (recommended)
+### Step 1 — Hotkey-driven
 
 ```bash
 cd /path/to/your/project
-flow activate           # Sentinel daemon starts in the background
+debugflow activate           # Sentinel daemon starts in the background
 ```
 
 You'll see the active hotkeys printed:
@@ -81,7 +81,7 @@ Then:
 1. Press **Ctrl+Alt+F** — the translucent HUD docks to the right edge of your screen.
 2. Press **Ctrl+Alt+S** — DebugFlow auto-runs your most recently modified `.py` file and streams every call into the HUD.
 
-### Option 2 — Programmatic (no daemon needed)
+### Step 2 — Programmatic (no daemon needed)
 
 ```python
 from debugflow.flow_engine import launch

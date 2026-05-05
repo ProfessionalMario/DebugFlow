@@ -45,7 +45,7 @@ Requires **Python 3.10+** on Windows, macOS, or Linux (with X11/Wayland for the 
 pip install -e .
 ```
 
-This installs the `debugflow` package and three console scripts: `flow`, `flow-logs`, `flow-logs-on`, `flow-logs-off`.
+This installs the `debugflow` package and three console scripts: `flow`, `debugflow-logs`, `debugflow-logs-on`, `debugflow-logs-off`.
 
 Dependencies (auto-installed):
 
@@ -98,8 +98,8 @@ Run the script directly. As long as the HUD is open on port 5555, traces flow in
 ### Stopping it
 
 ```bash
-flow status      # See if the sentinel is alive
-flow deactivate  # Kill the sentinel and the HUD
+debugflow status      # See if the sentinel is alive
+debugflow activate  # Kill the sentinel and the HUD by running again
 ```
 
 ---

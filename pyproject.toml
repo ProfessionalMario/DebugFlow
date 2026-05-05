@@ -1,21 +1,32 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "debugflow"
-version = "1.0.1"
-description = "NeuralFlow Logic Engine — real-time execution tracer and HUD for Python"
+version = "1.0.4"
+description = "DebugFlow — real-time execution tracer and HUD for Python"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "DebugFlow" }]
-keywords = ["debugger", "tracer", "hud", "visualization", "ml", "ai", "profiling"]
+license = { file = "LICENSE" }
+
+authors = [
+    { name = "Manikandan", email = "mani1756067@gmail.com" }
+]
+
+keywords = [
+    "debugger",
+    "tracer",
+    "visualization",
+    "profiling",
+    "hud",
+    "python",
+    "execution",
+    "ml"
+]
+
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Environment :: Win32 (MS Windows)",
-    "Environment :: MacOS X",
-    "Environment :: X11 Applications",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
@@ -28,31 +39,34 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
 ]
 
-# These are HARD requirements. Earlier versions of pyproject.toml shipped
-# with `dependencies = []`, which caused `pip install debugflow` to install
-# the package but leave it unable to import (no pynput/psutil/dearpygui).
-# Packaging "smoke test" before tagging a release: install the built wheel
-# into a clean venv and run `python -c "from debugflow.flow_service import main; main()"`.
 dependencies = [
     "dearpygui>=2.0,<3",
     "pynput>=1.7.6",
     "psutil>=5.9",
+    "numpy",
+    "pandas"
 ]
 
+[project.optional-dependencies]
+ml = ["torch"]
+
 [project.urls]
-Homepage = "https://github.com/yourname/debugflow"
+Homepage = "https://github.com/ProfessionalMario/DebugFlow"
+Repository = "https://github.com/ProfessionalMario/DebugFlow"
+Issues = "https://github.com/ProfessionalMario/DebugFlow/issues"
 
 [project.scripts]
-flow         = "debugflow.flow_service:main"
-flow-logs    = "debugflow.logger_system:toggle_logs_cli"
-flow-logs-on = "debugflow.logger_system:logs_on"
-flow-logs-off = "debugflow.logger_system:logs_off"
+debugflow = "debugflow.flow_service:main"
+debugflow-logs = "debugflow.logger_system:toggle_logs_cli"
+debugflow-logs-on = "debugflow.logger_system:logs_on"
+debugflow-logs-off = "debugflow.logger_system:logs_off"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# Don't ship runtime state files (PID lockfiles, log dirs) inside the wheel.
-# These are written at runtime under <project>/logs/ and <package>/.hud_pid;
-# packaging them would leak PIDs from the build machine into every install.
+# Only ignore Python bytecode noise (safe + standard)
 [tool.setuptools.exclude-package-data]
-"*" = [".hud_pid", ".engine_pid", ".die", "*.pyc", "__pycache__/*"]
+"*" = ["*.pyc", "__pycache__/*"]

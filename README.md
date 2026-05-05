@@ -276,6 +276,7 @@ flow-logs               # Toggle current state
 - Very long parameter strings still bleed past the 400px HUD column (truncation rules planned).
 - Port `5555` is hard-coded; a process-level conflict will print a clear error in the log but currently requires a manual restart.
 - Things ghost mode can't see without annotations
+- To prevent ModuleNotFoundError in the HUD, always run flow activate from your Project Root (the same folder where you run your main script) so that relative imports resolve correctly.
 
 **Ghost Mode Limits**
 

@@ -342,30 +342,53 @@ class FlowSentinel:
             time.sleep(0.5)
             self.ignite_ghost_pipeline()
 
-    def ignite_ghost_pipeline(self):
-        """Fire the Ghost Scout pass so the HUD shows the project architecture."""
-        try:
-            sync_id = "GHOST_DRAW"
-            # Use the installed package path so this works both in dev and as a package
-            engine_cmd = (
-                "import sys; "
-                f"sys.path.insert(0, {repr(os.path.dirname(self.base_dir))}); "
-                "from debugflow.flow_engine import FlowEngine; "
-                f"FlowEngine.ignite_from_service({repr(sync_id)})"
-            )
+    # def ignite_ghost_pipeline(self):
+    #     """Fire the Ghost Scout pass so the HUD shows the project architecture."""
+    #     try:
+    #         sync_id = "GHOST_DRAW"
+    #         # Use the installed package path so this works both in dev and as a package
+    #         engine_cmd = (
+    #             "import sys; "
+    #             f"sys.path.insert(0, {repr(os.path.dirname(self.base_dir))}); "
+    #             "from debugflow.flow_engine import FlowEngine; "
+    #             f"FlowEngine.ignite_from_service({repr(sync_id)})"
+    #         )
 
-            # No cwd override — inherit the sentinel's working directory,
-            # which is the user's project folder (set when `flow activate` ran).
-            # Using cwd=self.base_dir was pointing at the package's own directory,
-            # causing ignite_from_service to find animation.py / flow_bridge.py
-            # instead of the user's scripts.
-            subprocess.Popen(
-                [PYTHON_EXE, "-c", engine_cmd],
-                **_make_flags(detached=False),
-            )
-            log.info("📊 Ghost Pipeline: Architecture Snapshot Sent.")
-        except Exception as e:
-            log.error(f"Ghost Ignition Failed: {e}")
+    #         # No cwd override — inherit the sentinel's working directory,
+    #         # which is the user's project folder (set when `flow activate` ran).
+    #         # Using cwd=self.base_dir was pointing at the package's own directory,
+    #         # causing ignite_from_service to find animation.py / flow_bridge.py
+    #         # instead of the user's scripts.
+    #         subprocess.Popen(
+    #             [PYTHON_EXE, "-c", engine_cmd],
+    #             **_make_flags(detached=False),
+    #         )
+    #         log.info("📊 Ghost Pipeline: Architecture Snapshot Sent.")
+    #     except Exception as e:
+    #         log.error(f"Ghost Ignition Failed: {e}")
+
+    def ignite_ghost_pipeline(self):
+        project_root = os.environ.get("FLOW_PROJECT_ROOT") or os.getcwd()
+        target_script = os.environ.get("FLOW_CURRENT_SCRIPT")
+        
+        # We need to find the "Package Root" (where the user's 'src' or main code starts)
+        # Usually, it's just project_root.
+        
+        engine_cmd = (
+            "import sys; import os; "
+            # 1. Inject Project Root FIRST (Highest Priority)
+            f"sys.path.insert(0, {repr(project_root)}); " 
+            # 2. Inject the folder of the script itself (Standard Python behavior)
+            f"if {repr(target_script)}: sys.path.insert(1, os.path.dirname({repr(target_script)})); "
+            "from debugflow.flow_engine import FlowEngine; "
+            "FlowEngine.ignite_from_service('GHOST_DRAW')"
+        )
+
+        subprocess.Popen(
+            [sys.executable, "-c", engine_cmd],
+            cwd=project_root, # CRITICAL: Start the process in the root
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
 
     def _force_kill_hud(self):
         """Surgically terminate the HUD process and all its children."""
@@ -603,7 +626,14 @@ def activate():
     )
 
     print("\n" + "═" * 50)
-    print("  ✔  NEURALFLOW: ENGINE ACTIVATED")
+    print("✔  NEURALFLOW: ENGINE ACTIVATED\n")
+    print(
+        "Note:\n"
+        "Run the following commands from your project root to avoid module errors:\n\n"
+        "  cd path/to/your/project_root\n"
+        "  debugflow activate\n"
+        "  python your_entry_script.py\n"
+    )
     print("═" * 50)
     print("  [NODE PROTOCOLS]")
     print("  🟡 YELLOW : Processing (Active Thread)")
@@ -616,13 +646,13 @@ def activate():
     print("─" * 50)
     print("  [SYSTEM CONTROLS]")
     print("  • CTRL + ALT + F : Toggle HUD & Ghost Sync")
-    print("  • CTRL + S       : Auto-Trace (If HUD is open)")
-    print("  • flow activate  : Deactivate NeuralFlow")
+    print("  • CTRL + ALT + S       : Auto-Trace (If HUD is open)")
+    print("  • debugflow activate  : Deactivate NeuralFlow")
     print("─" * 50)
     print("  [LOGGING]")
-    print("  • flow-logs on   : Enable debug log  → ./logs/debugflow.log")
-    print("  • flow-logs off  : Disable logging")
-    print("  • flow-logs status : Check current state")
+    print("  • debugflow-logs on   : Enable debug log  → ./logs/debugflow.log")
+    print("  • debugflow-logs off  : Disable logging")
+    print("  • debugflow-logs status : Check current state")
     print("═" * 50)
     print("  Sentinel is monitoring the nervous system...\n")
 
@@ -632,7 +662,7 @@ def _print_usage():
     print("  flow — NeuralFlow Logic Engine CLI")
     print("═" * 50)
     print("  Usage:")
-    print("    flow activate            Toggle the NeuralFlow sentinel on/off")
+    print("    debugflow activate            Toggle the NeuralFlow sentinel on/off")
     print("    flow status              Show whether the sentinel is running")
     print("    flow help                Show this message")
     print()
@@ -658,6 +688,16 @@ def main():
     `flow xyz`) prints usage instead of silently activating, which used to
     happen when this entry point was wired straight to activate().
     """
+    # 1. Check if a Sentinel is already running
+    if os.path.exists(".hud_pid"):
+        # Instead of just failing, try to see if that process is actually alive
+        with open(".hud_pid", "r") as f:
+            old_pid = int(f.read())
+        
+        if psutil.pid_exists(old_pid):
+            log.warning(f"⚠️ Sentinel already running (PID: {old_pid}). Restarting...")
+            os.kill(old_pid, 9) # Force kill the old one
+            
     args = sys.argv[1:]
 
     if not args:

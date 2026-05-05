@@ -11,6 +11,13 @@ import platform
 from . import log
 from .flow_bridge import Flow
 
+import numpy as np
+
+try:
+    import torch
+except ImportError:
+    torch = None
+    
 # --- GHOST FLOW LOOP GUARDS ---
 # Bound how much work a single ghost pass can do so a user's `while True:` /
 # blocking input call / runaway recursion never freezes the HUD.
@@ -249,7 +256,8 @@ def trace_calls(frame, event, arg):
             # Capture the live local variables at call time.
             # These are the actual param values the function received, enabling
             # accurate type-gate validation inside Flow.pulse.
-            live_params = dict(frame.f_locals)
+            # live_params = dict(frame.f_locals)
+            live_params = {k: _safe_serialize(v) for k, v in frame.f_locals.items()}
             Flow.pulse(
                 fn_obj or func_name,
                 params=live_params,
@@ -389,6 +397,38 @@ def generate_ball(annotation):
     except Exception:
         return None
     return None
+
+
+
+def _safe_serialize(obj, depth=0):
+    """
+    Converts complex objects (Tensors, Arrays, DataFrames) into 
+    metadata strings that an LLM can actually reason about.
+    """
+    if depth > 2: return "..." # Prevent infinite recursion
+    
+    # --- Torch Tensors ---
+    if hasattr(obj, "__module__") and "torch" in obj.__module__:
+        if hasattr(obj, "shape"):
+            dtype = getattr(obj, "dtype", "unknown")
+            return f"torch.Tensor(shape={list(obj.shape)}, dtype={dtype})"
+            
+    # --- Numpy Arrays ---
+    if isinstance(obj, np.ndarray):
+        return f"np.ndarray(shape={obj.shape}, dtype={obj.dtype})"
+        
+    # --- Standard Collections ---
+    if isinstance(obj, dict):
+        return {k: _safe_serialize(v, depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe_serialize(v, depth + 1) for v in obj[:5]] # Cap preview
+        
+    # --- Fallback to String ---
+    try:
+        return str(obj)
+    except:
+        return "<Unserializable Object>"
+
 
 
 def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):

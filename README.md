@@ -106,8 +106,24 @@ Run the script directly. As long as the HUD is open on port 5555, traces flow in
 
 ```bash
 debugflow status      # See if the sentinel is alive
-debugflow activate  # Kill the sentinel and the HUD by running again
+debugflow deactivate  # Stop the sentinel and close the HUD
 ```
+
+### If the HUD or sentinel freezes
+
+`debugflow deactivate` sends a graceful SIGTERM and is almost always enough. If the process is truly stuck:
+
+```bash
+# Unix / macOS
+debugflow status          # note the PID
+kill <PID>                # hard-kill sentinel
+kill <HUD-PID>            # kill HUD separately if needed (check htop / Activity Monitor)
+
+# Windows
+taskkill /PID <PID> /F
+```
+
+Port 5555 conflict will print a clear error in the log. Restart with `debugflow deactivate && debugflow activate` to re-bind.
 
 ---
 

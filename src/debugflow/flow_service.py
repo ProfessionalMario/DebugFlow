@@ -460,10 +460,9 @@ class FlowSentinel:
             if old_engine_pid and psutil.pid_exists(old_engine_pid):
                 try:
                     proc = psutil.Process(old_engine_pid)
-                    # Graceful terminate first, hard kill if still running.
                     proc.terminate()
                     try:
-                        proc.wait(timeout=2.0)
+                        proc.wait(timeout=0.15)
                     except psutil.TimeoutExpired:
                         proc.kill()
                     log.info(f"🔪 Terminated stale engine (PID {old_engine_pid})")
@@ -503,93 +502,209 @@ class FlowSentinel:
             log.error(f"Failed to sync save event: {e}")
 
     def start_listening(self):
-        """
-        Entry point for the background daemon.
-
-        Hotkeys are configurable via env vars so users on different OSes /
-        editors can dodge conflicts:
-
-            FLOW_HUD_HOTKEY      (default '<ctrl>+<alt>+f')
-            FLOW_TRIGGER_HOTKEY  (default '<ctrl>+<alt>+s')
-
-        The trigger default is intentionally NOT plain Ctrl+S — that combo is
-        bound by virtually every editor (VS Code, Sublime, IntelliJ, Notepad++)
-        for "Save File", and even though pynput's low-level Windows hook
-        usually still sees the key, the editor's save handler fires first and
-        many users perceive the trigger as "dead". Ctrl+Alt+S avoids that.
-
-        Format follows pynput's HotKey grammar:
-          modifiers: <ctrl> <alt> <shift> <cmd> <super>  + a single key, e.g.
-            <ctrl>+<alt>+s
-            <ctrl>+<shift>+1
-            <f5>
-        """
+        """Bind hotkeys and block until the keyboard listener exits."""
         if not _KEYBOARD_AVAILABLE:
-            print(
-                "  ⚠️  [HOTKEYS UNAVAILABLE]: pynput could not be loaded.\n"
-                "  On Linux ensure a display server (X11/Wayland) is running.\n"
-                "  Install manually: pip install pynput"
+            log.error(
+                "pynput unavailable — sentinel is running without hotkeys. "
+                "On Linux ensure a display server (X11/Wayland) is running."
             )
-            log.error("pynput unavailable. Sentinel will idle without hotkeys.")
-            # Keep the process alive so the PID file stays valid — do not exit.
             while True:
                 time.sleep(10)
             return
 
         hud_hotkey = os.environ.get("FLOW_HUD_HOTKEY", "<ctrl>+<alt>+f").strip()
         trigger_hotkey = os.environ.get("FLOW_TRIGGER_HOTKEY", "<ctrl>+<alt>+s").strip()
-
-        # Friendly label for stdout (strips the angle brackets pynput requires).
-        def _pretty(h):
-            return (
-                h.replace("<", "")
-                 .replace(">", "")
-                 .replace("ctrl", "Ctrl")
-                 .replace("alt", "Alt")
-                 .replace("shift", "Shift")
-                 .replace("cmd", "Cmd")
-                 .replace("+", " + ")
-                 .upper()
-                 .replace("CTRL", "Ctrl")
-                 .replace("ALT", "Alt")
-                 .replace("SHIFT", "Shift")
-                 .replace("CMD", "Cmd")
-            )
-
-        # Tell the user — both via stdout (visible in their terminal) and the
-        # log file — exactly which keys are live, so there's no guessing.
-        banner = (
-            "\n  ──────────────────────────────────────\n"
-            "  ⌨️   DebugFlow hotkeys active:\n"
-            f"        Toggle HUD     : {_pretty(hud_hotkey)}\n"
-            f"        Run / Trigger  : {_pretty(trigger_hotkey)}\n"
-            "  ──────────────────────────────────────\n"
-            "  Override via env vars:\n"
-            "      FLOW_HUD_HOTKEY      (e.g. '<ctrl>+<alt>+h')\n"
-            "      FLOW_TRIGGER_HOTKEY  (e.g. '<f5>')\n"
-            "  ──────────────────────────────────────\n"
-        )
-        print(banner)
-        log.info(
-            f"⌨️  Binding hotkeys: HUD='{hud_hotkey}', TRIGGER='{trigger_hotkey}'"
-        )
+        log.info(f"⌨️  Binding hotkeys: HUD='{hud_hotkey}', TRIGGER='{trigger_hotkey}'")
 
         try:
             hotkeys = {
                 hud_hotkey: self.toggle_hud,
                 trigger_hotkey: self.log_save_event,
             }
-            # ChordWatcher (custom) instead of pynput.GlobalHotKeys — see the
-            # comment block at the top of this file for why.
             watcher = ChordWatcher(hotkeys)
             watcher.join()
         except Exception as e:
             log.error(f"Hotkey listener crashed: {e}\n{traceback.format_exc()}")
 
 
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_SENTINEL_PID_FILE = os.path.join(_BASE_DIR, ".sentinel_pid")
+
+
+def _pretty(h: str) -> str:
+    """Format a pynput hotkey spec like '<ctrl>+<alt>+s' into 'Ctrl + Alt + S'."""
+    return (
+        h.replace("<", "").replace(">", "")
+         .replace("ctrl", "Ctrl").replace("alt", "Alt")
+         .replace("shift", "Shift").replace("cmd", "Cmd")
+         .replace("+", " + ").upper()
+         .replace("CTRL", "Ctrl").replace("ALT", "Alt")
+         .replace("SHIFT", "Shift").replace("CMD", "Cmd")
+    )
+
+
+def _cmd_activate():
+    """Spawn the sentinel as a detached background process and print the banner."""
+    if os.path.exists(_SENTINEL_PID_FILE):
+        try:
+            with open(_SENTINEL_PID_FILE) as f:
+                pid = int(f.read().strip())
+            if psutil.pid_exists(pid):
+                print(
+                    f"\n  DebugFlow sentinel is already running (PID {pid}).\n"
+                    "  Use `debugflow deactivate` to stop it.\n"
+                )
+                return
+        except Exception:
+            pass
+        try:
+            os.remove(_SENTINEL_PID_FILE)
+        except Exception:
+            pass
+
+    env = os.environ.copy()
+    env["FLOW_SENTINEL_WORKER"] = "1"
+    env["FLOW_PROJECT_ROOT"] = env.get("FLOW_PROJECT_ROOT") or os.getcwd()
+
+    if platform.system() == "Windows":
+        proc = subprocess.Popen(
+            [PYTHON_EXE, "-m", "debugflow.flow_service"],
+            env=env,
+            **_make_flags(detached=True),
+            close_fds=True,
+        )
+    else:
+        proc = subprocess.Popen(
+            [PYTHON_EXE, "-m", "debugflow.flow_service"],
+            env=env,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+
+    # Brief pause so the worker can write its PID file and bind hotkeys
+    time.sleep(0.3)
+
+    hud_hotkey = env.get("FLOW_HUD_HOTKEY", "<ctrl>+<alt>+f")
+    trigger_hotkey = env.get("FLOW_TRIGGER_HOTKEY", "<ctrl>+<alt>+s")
+
+    print(
+        "\n  ──────────────────────────────────────\n"
+        "  DebugFlow hotkeys active:\n"
+        f"        Toggle HUD     : {_pretty(hud_hotkey)}\n"
+        f"        Run / Trigger  : {_pretty(trigger_hotkey)}\n"
+        "  ──────────────────────────────────────\n"
+        "  Logs  :  debugflow-logs on / off\n"
+        "  Stop  :  debugflow deactivate\n"
+        "  ──────────────────────────────────────\n"
+    )
+
+
+def _cmd_deactivate():
+    """Stop the sentinel and the HUD."""
+    killed = False
+
+    if os.path.exists(_SENTINEL_PID_FILE):
+        try:
+            with open(_SENTINEL_PID_FILE) as f:
+                pid = int(f.read().strip())
+            if psutil.pid_exists(pid):
+                psutil.Process(pid).terminate()
+                print(f"\n  Sentinel stopped  (PID {pid}).")
+                killed = True
+        except Exception:
+            pass
+        try:
+            os.remove(_SENTINEL_PID_FILE)
+        except Exception:
+            pass
+
+    hud_pid_file = os.path.join(_BASE_DIR, ".hud_pid")
+    if os.path.exists(hud_pid_file):
+        try:
+            with open(hud_pid_file) as f:
+                hud_pid = int(f.read().strip())
+            if psutil.pid_exists(hud_pid):
+                psutil.Process(hud_pid).terminate()
+                print(f"  HUD closed        (PID {hud_pid}).")
+        except Exception:
+            pass
+        try:
+            os.remove(hud_pid_file)
+        except Exception:
+            pass
+
+    if not killed:
+        print("\n  Sentinel is not running.")
+    print()
+
+
+def _cmd_status():
+    """Print whether the sentinel is running."""
+    running = False
+    if os.path.exists(_SENTINEL_PID_FILE):
+        try:
+            with open(_SENTINEL_PID_FILE) as f:
+                pid = int(f.read().strip())
+            if psutil.pid_exists(pid):
+                print(f"\n  Sentinel : RUNNING  (PID {pid})\n")
+                running = True
+        except Exception:
+            pass
+    if not running:
+        print("\n  Sentinel : STOPPED\n")
+
+
+def _print_usage():
+    print(
+        "\n  Usage: debugflow <command>\n"
+        "\n  Commands:\n"
+        "    activate     Start the hotkey sentinel in the background\n"
+        "    deactivate   Stop the sentinel and close the HUD\n"
+        "    status       Show whether the sentinel is running\n"
+        "\n  Log commands:\n"
+        "    debugflow-logs on    Enable file logging\n"
+        "    debugflow-logs off   Disable file logging\n"
+        "    debugflow-logs       Toggle logging\n"
+        "\n  If the HUD or sentinel freezes:\n"
+        "    debugflow deactivate          — clean stop\n"
+        "    kill <PID>                    — Unix: use PID from `debugflow status`\n"
+        "    taskkill /PID <PID> /F        — Windows equivalent\n"
+    )
+
+
 def main():
-    sentinel = FlowSentinel()
-    sentinel.start_listening()
+    import signal
+
+    # --- BACKGROUND WORKER PATH ---
+    # When re-spawned by _cmd_activate, we are the daemon.  Register SIGTERM
+    # for a clean shutdown and drop straight into the hotkey loop.
+    if os.environ.get("FLOW_SENTINEL_WORKER") == "1":
+        def _shutdown(sig, frame):
+            sys.exit(0)
+        try:
+            signal.signal(signal.SIGTERM, _shutdown)
+        except Exception:
+            pass
+        try:
+            with open(_SENTINEL_PID_FILE, "w") as f:
+                f.write(str(os.getpid()))
+        except Exception:
+            pass
+        FlowSentinel().start_listening()
+        return
+
+    # --- CLI DISPATCHER ---
+    cmd = (sys.argv[1].lower().strip() if len(sys.argv) > 1 else "").strip()
+    if cmd == "activate":
+        _cmd_activate()
+    elif cmd == "deactivate":
+        _cmd_deactivate()
+    elif cmd == "status":
+        _cmd_status()
+    else:
+        _print_usage()
 
 
 if __name__ == "__main__":

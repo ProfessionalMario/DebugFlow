@@ -15,13 +15,8 @@ import platform
 from . import log
 from .flow_bridge import Flow
 
-import numpy as np
 
-try:
-    import torch
-except ImportError:
-    torch = None
-    
+
 # --- GHOST FLOW LOOP GUARDS ---
 # Bound how much work a single ghost pass can do so a user's `while True:` /
 # blocking input call / runaway recursion never freezes the HUD.
@@ -415,8 +410,12 @@ def _safe_serialize(obj, depth=0):
             return f"torch.Tensor(shape={list(obj.shape)}, dtype={dtype})"
             
     # --- Numpy Arrays ---
-    if isinstance(obj, np.ndarray):
-        return f"np.ndarray(shape={obj.shape}, dtype={obj.dtype})"
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.ndarray):
+            return f"np.ndarray(shape={obj.shape}, dtype={obj.dtype})"
+    except ImportError:
+        pass
         
     # --- Standard Collections ---
     if isinstance(obj, dict):

@@ -1,0 +1,44 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "3cWFbHEQdohAs3_6lvuXK"
+uri = "file://demo_gifs/demo_pulse.gif"
+type = "image"
+title = "Call Flow — nodes spawn with downward pulse"
+
+[[outputs]]
+id = "0oyF6gL_fdXeL329VOaY8"
+uri = "file://demo_gifs/demo_returns.gif"
+type = "image"
+title = "Return Flow — green success / red exception"
+
+[[outputs]]
+id = "bxy97drwPutr2aj7wYfTB"
+uri = "file://demo_gifs/demo_hover.gif"
+type = "image"
+title = "Hover Metadata — module + duration overlay"
+
+[[outputs]]
+id = "66P7G2byLuVljKDu3RtAV"
+uri = "file://demo_gifs/demo_refracted.gif"
+type = "image"
+title = "Refracted Call — f5 calls f1, pulse goes back UP"
+
+[[outputs]]
+id = "CKayUlQJT2M85hv6cW8ad"
+uri = "file://demo_gifs/demo_crash_blame.gif"
+type = "image"
+title = "Crash Blame Chain — C crashes, A→B→C all blamed"
+
+[[outputs]]
+id = "YXcbli3oTrCl8FFLkVKue"
+uri = "file://demo_gifs/demo_streaming.gif"
+type = "image"
+title = "Data Streaming — rapid concurrent pulses"
+
+[[outputs]]
+id = "Py8I5qwRyeSzZcoVaPIdS"
+uri = "file://demo_gifs/demo_all_states.gif"
+type = "image"
+title = "All Node States — ghost / processing / success / nuke"

@@ -122,12 +122,14 @@ class FlowEngine:
                 f"🔥 Auto-booting most-recent script: {target_script}  "
                 f"(of {len(all_py)} candidate{'s' if len(all_py) != 1 else ''})"
             )
+            # Flow.pulse("SYSCALL: REFRESH")
 
             os.environ["FLOW_SYNC_ID"] = sync_id
 
             spec = importlib.util.spec_from_file_location("__main__", target_abs)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            
             log.info(f"✅ Engine finished executing {target_script}.")
         except Exception as e:
             log.critical(f"💥 Engine Discovery Crash: {e}", exc_info=True)
@@ -486,6 +488,7 @@ def launch(func_name, Ghost=True, Real_Time=True, _func_ref=None, _params=None):
         # --- 2. EXECUTION BRANCHING ---
         if Ghost:
             # --- GHOST SCOUT PASS ---
+            
             Flow.mode = 0
             Flow.pulse("SYSCALL: REFRESH", node_type="refresh")
             time.sleep(0.02)

@@ -1,0 +1,20 @@
+# IDE
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+
+# build
+dist/
+build/
+tests/
+*.egg-info/
+Todo.md
+
+# logs
+logs/
+
+# env
+.env
+.venv

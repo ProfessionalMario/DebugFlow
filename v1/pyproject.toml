@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "debugflow"
+version = "1.0.5"
+description = "DebugFlow — real-time execution tracer and HUD for Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+authors = [
+    { name = "Manikandan", email = "mani1756067@gmail.com" }
+]
+
+keywords = [
+    "debugger",
+    "tracer",
+    "visualization",
+    "profiling",
+    "hud",
+    "python",
+    "execution",
+    "ml"
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+]
+
+dependencies = [
+    "dearpygui>=2.0,<3",
+    "pynput>=1.7.6",
+    "psutil>=5.9",
+    "numpy",
+    "pandas"
+]
+
+[project.optional-dependencies]
+ml = ["torch"]
+
+[project.urls]
+Homepage = "https://github.com/ProfessionalMario/DebugFlow"
+Repository = "https://github.com/ProfessionalMario/DebugFlow"
+Issues = "https://github.com/ProfessionalMario/DebugFlow/issues"
+
+[project.scripts]
+debugflow = "debugflow.flow_service:main"
+debugflow-logs = "debugflow.logger_system:toggle_logs_cli"
+debugflow-logs-on = "debugflow.logger_system:logs_on"
+debugflow-logs-off = "debugflow.logger_system:logs_off"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Only ignore Python bytecode noise (safe + standard)
+[tool.setuptools.exclude-package-data]
+"*" = ["*.pyc", "__pycache__/*"]

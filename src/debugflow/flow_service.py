@@ -356,6 +356,9 @@ class FlowSentinel:
                 env=env,
                 **_make_flags(detached=True),
             )
+            # from .flow_bridge import Flow
+            # Flow.pulse("SYSCALL: REFRESH")
+            
             with open(self.hud_pid_file, "w") as f:
                 f.write(str(proc.pid))
 
@@ -398,6 +401,7 @@ class FlowSentinel:
                 env=env,
                 **_make_flags(detached=False),
             )
+            
             log.info("📊 Ghost Pipeline: Architecture Snapshot triggered.")
         except Exception as e:
             log.error(f"Ghost Ignition Failed: {e}")
@@ -542,7 +546,6 @@ def _pretty(h: str) -> str:
          .replace("SHIFT", "Shift").replace("CMD", "Cmd")
     )
 
-
 def _cmd_activate():
     """Spawn the sentinel as a detached background process and print the banner."""
     if os.path.exists(_SENTINEL_PID_FILE):
@@ -583,23 +586,52 @@ def _cmd_activate():
             close_fds=True,
         )
 
-    # Brief pause so the worker can write its PID file and bind hotkeys
     time.sleep(0.3)
 
     hud_hotkey = env.get("FLOW_HUD_HOTKEY", "<ctrl>+<alt>+f")
     trigger_hotkey = env.get("FLOW_TRIGGER_HOTKEY", "<ctrl>+<alt>+s")
 
-    print(
-        "\n  ──────────────────────────────────────\n"
-        "  DebugFlow hotkeys active:\n"
-        f"        Toggle HUD     : {_pretty(hud_hotkey)}\n"
-        f"        Run / Trigger  : {_pretty(trigger_hotkey)}\n"
-        "  ──────────────────────────────────────\n"
-        "  Logs  :  debugflow-logs on / off\n"
-        "  Stop  :  debugflow deactivate\n"
-        "  ──────────────────────────────────────\n"
-    )
+    print("\n" + "═" * 50)
+    print("✔  DEBUGFLOW: ENGINE ACTIVATED\n")
+    print("─" * 50)
 
+    print("  DebugFlow hotkeys active:")
+    print(f"        Toggle HUD     : {hud_hotkey}")
+    print(f"        Run / Trigger  : {trigger_hotkey}")
+    print("        Refresh HUD    : Ctrl + Alt + S (first press after HUD boot)")
+    print("─" * 50)
+
+    print("  Run context (IMPORTANT):")
+    print("    Always run from project root:")
+    print("      cd path/to/your/project_root")
+    print("      debugflow activate")
+    print("      python your_entry_script.py")
+    print("─" * 50)
+
+    print("  [NODE PROTOCOLS]")
+    print("  🟡 YELLOW : Processing (Active Thread)")
+    print("  🟢 GREEN  : Success    (Data Synapse)")
+    print("  🔴 RED    : Nuke       (Critical Failure)")
+    print("─" * 50)
+
+    print("  [EXECUTION MODES]")
+    print("  👻 GHOST  : Non-destructive Logic Mapping")
+    print("  ⏳ LIVE   : Real-time Production Trace")
+    print("─" * 50)
+
+    print("  [SYSTEM CONTROLS]")
+    print("  • Ctrl + Alt + F : Toggle HUD & Ghost Sync")
+    print("  • Ctrl + Alt + S : First press refreshes HUD, then runs trace")
+    print("  • debugflow activate : Toggle sentinel")
+    print("─" * 50)
+
+    print("  [LOGGING]")
+    print("  • debugflow-logs on      → enable logging")
+    print("  • debugflow-logs off     → disable logging")
+    print("  • debugflow-logs status  → check state")
+    print("─" * 50)
+
+    print("  Sentinel is monitoring the nervous system...\n")
 
 def _cmd_deactivate():
     """Stop the sentinel and the HUD."""

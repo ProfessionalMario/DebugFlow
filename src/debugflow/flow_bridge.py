@@ -35,6 +35,7 @@ class Flow:
             with socket.create_connection(("127.0.0.1", 5555), timeout=0.5):
                 Flow._connected = True
                 log.info(f"🤝 Bridge connected to HUD on :5555 (sync_id={sync_id}).")
+                # Flow.pulse("SYSCALL: REFRESH")
         except (ConnectionRefusedError, socket.timeout):
             Flow._connected = False
             log.warning(

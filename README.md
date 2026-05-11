@@ -11,7 +11,7 @@ Built for two audiences:
 
 ## 🎬 Demo Video
 
-[![Watch DebugFlow Demo](https://img.youtube.com/vi/qBIfWR2gbLw/0.jpg)](https://youtu.be/qBIfWR2gbLw)
+[![DebugFlow Demo](https://img.youtube.com/vi/qBIfWR2gbLw/maxresdefault.jpg)](https://youtu.be/qBIfWR2gbLw)
 
 
 

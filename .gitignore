@@ -15,7 +15,9 @@ Todo.md
 # logs
 logs/
 v1/
-
+.local/
+.agents/
+*.zip
 # env
 .env
 .venv
